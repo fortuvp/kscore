@@ -199,6 +199,31 @@ const GET_AGENT_WITH_FEEDBACK = gql`
   }
 `;
 
+const GET_AGENT_WITH_FEEDBACK_NO_STATS = gql`
+  query GetAgentWithFeedbackNoStats($id: ID!, $feedbackFirst: Int!) {
+    agent(id: $id) {
+      ${AGENT_FIELDS_FULL}
+      feedback(where: { isRevoked: false }, orderBy: createdAt, orderDirection: desc, first: $feedbackFirst) {
+        id
+        value
+        tag1
+        tag2
+        clientAddress
+        createdAt
+        feedbackFile {
+          text
+          mcpTool
+          mcpPrompt
+          mcpResource
+          a2aSkills
+          a2aContextId
+          a2aTaskId
+        }
+      }
+    }
+  }
+`;
+
 const GET_AGENT_BY_AGENT_ID = gql`
   query GetAgentByAgentId($agentId: String!) {
     agents(where: { agentId: $agentId }, first: 1) {
@@ -232,6 +257,31 @@ const GET_AGENT_BY_AGENT_ID = gql`
   }
 `;
 
+const GET_AGENT_BY_AGENT_ID_NO_STATS = gql`
+  query GetAgentByAgentIdNoStats($agentId: String!) {
+    agents(where: { agentId: $agentId }, first: 1) {
+      ${AGENT_FIELDS_FULL}
+      feedback(where: { isRevoked: false }, orderBy: createdAt, orderDirection: desc, first: 10) {
+        id
+        value
+        tag1
+        tag2
+        clientAddress
+        createdAt
+        feedbackFile {
+          text
+          mcpTool
+          mcpPrompt
+          mcpResource
+          a2aSkills
+          a2aContextId
+          a2aTaskId
+        }
+      }
+    }
+  }
+`;
+
 // Handler types
 export type OrderBy = "createdAt" | "updatedAt" | "lastActivity" | "totalFeedback";
 export type OrderDirection = "asc" | "desc";
@@ -259,6 +309,15 @@ interface GetAgentsByOwnerParams {
     skip?: number;
     protocol?: string;
     network?: AgentSubgraphNetwork;
+}
+
+function isMissingAgentStatsField(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return (
+        message.includes("Type `Query` has no field `agentStats`") ||
+        message.includes('Cannot query field "agentStats" on type "Query"') ||
+        message.includes("Cannot query field 'agentStats' on type 'Query'")
+    );
 }
 
 // Handler functions
@@ -320,26 +379,50 @@ export async function getAgentWithFeedback(
     feedbackFirst: number = 10,
     network: AgentSubgraphNetwork = "sepolia"
 ): Promise<AgentWithDetails | null> {
-    const response = await getClient(network).request<{
-        agent: (Agent & { feedback: Feedback[] }) | null;
-        agentStats: AgentStats | null;
-    }>(GET_AGENT_WITH_FEEDBACK, { id, feedbackFirst });
+    try {
+        const response = await getClient(network).request<{
+            agent: (Agent & { feedback: Feedback[] }) | null;
+            agentStats: AgentStats | null;
+        }>(GET_AGENT_WITH_FEEDBACK, { id, feedbackFirst });
 
-    if (!response.agent) return null;
+        if (!response.agent) return null;
 
-    return { ...response.agent, stats: response.agentStats };
+        return { ...response.agent, stats: response.agentStats };
+    } catch (error) {
+        if (!isMissingAgentStatsField(error)) throw error;
+
+        const fallbackResponse = await getClient(network).request<{
+            agent: (Agent & { feedback: Feedback[] }) | null;
+        }>(GET_AGENT_WITH_FEEDBACK_NO_STATS, { id, feedbackFirst });
+
+        if (!fallbackResponse.agent) return null;
+
+        return { ...fallbackResponse.agent, stats: null };
+    }
 }
 
 export async function getAgentByAgentId(
     agentId: string,
     network: AgentSubgraphNetwork = "sepolia"
 ): Promise<AgentWithDetails | null> {
-    const response = await getClient(network).request<{
-        agents: (Agent & { feedback: Feedback[] })[];
-        agentStats: AgentStats | null;
-    }>(GET_AGENT_BY_AGENT_ID, { agentId });
+    try {
+        const response = await getClient(network).request<{
+            agents: (Agent & { feedback: Feedback[] })[];
+            agentStats: AgentStats | null;
+        }>(GET_AGENT_BY_AGENT_ID, { agentId });
 
-    if (!response.agents || response.agents.length === 0) return null;
+        if (!response.agents || response.agents.length === 0) return null;
 
-    return { ...response.agents[0], stats: response.agentStats };
+        return { ...response.agents[0], stats: response.agentStats };
+    } catch (error) {
+        if (!isMissingAgentStatsField(error)) throw error;
+
+        const fallbackResponse = await getClient(network).request<{
+            agents: (Agent & { feedback: Feedback[] })[];
+        }>(GET_AGENT_BY_AGENT_ID_NO_STATS, { agentId });
+
+        if (!fallbackResponse.agents || fallbackResponse.agents.length === 0) return null;
+
+        return { ...fallbackResponse.agents[0], stats: null };
+    }
 }
