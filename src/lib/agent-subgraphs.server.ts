@@ -11,12 +11,21 @@ function getTheGraphApiKey(): string {
 }
 
 export function getAgentSubgraphKey(network: AgentSubgraphNetwork): string {
-  const envVarName = AGENT_SUBGRAPH_ENV_KEYS[network];
-  const key = process.env[envVarName];
+  const { envVarName, subgraphId: key } = describeAgentSubgraphConfig(network);
   if (!key) {
     throw new Error(`Missing env var ${envVarName} (required subgraph key for ${network})`);
   }
   return key;
+}
+
+export function describeAgentSubgraphConfig(network: AgentSubgraphNetwork) {
+  const envVarName = AGENT_SUBGRAPH_ENV_KEYS[network];
+  const subgraphId = process.env[envVarName] || null;
+  return {
+    envVarName,
+    subgraphId,
+    gatewayUrl: subgraphId ? `https://gateway.thegraph.com/api/[configured]/subgraphs/id/${subgraphId}` : null,
+  };
 }
 
 export function getAgentSubgraphUrl(network: AgentSubgraphNetwork): string {

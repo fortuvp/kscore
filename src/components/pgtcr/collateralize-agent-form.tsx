@@ -2,8 +2,9 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { Copy } from "lucide-react";
 import { toast } from "sonner";
-import { useAccount, useChainId, useReadContract, useWriteContract } from "wagmi";
+import { useAccount, useBalance, useChainId, useReadContract, useWriteContract } from "wagmi";
 import { sepolia } from "wagmi/chains";
 import { formatEther, formatUnits, isAddress, parseUnits } from "viem";
 
@@ -128,6 +129,14 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
     query: { enabled: Boolean(address && tokenAddress && registryAddress) },
   }).data as bigint | undefined;
 
+  const tokenBalance = useReadContract({
+    address: tokenAddress,
+    abi: ERC20_ABI,
+    functionName: "balanceOf",
+    args: address ? [address] : undefined,
+    query: { enabled: Boolean(address && tokenAddress) },
+  }).data as bigint | undefined;
+
   const arbitrationCost = useReadContract({
     address: arbitratorAddress,
     abi: IARBITRATOR_ABI,
@@ -135,6 +144,12 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
     args: arbitratorExtraData ? [arbitratorExtraData] : undefined,
     query: { enabled: Boolean(arbitratorAddress && arbitratorExtraData) },
   }).data as bigint | undefined;
+
+  const nativeBalance = useBalance({
+    address,
+    chainId: sepolia.id,
+    query: { enabled: Boolean(address) },
+  }).data?.value;
 
   React.useEffect(() => {
     setApprovalStepDone(false);
@@ -198,6 +213,16 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
   }, [depositInput, submissionMinDeposit, tokenDecimals]);
 
   const needsApproval = Boolean(allowance !== undefined && allowance < deposit);
+  const hasEnoughTokenBalance = tokenBalance === undefined || tokenBalance >= deposit;
+  const hasEnoughNativeBalance = arbitrationCost === undefined || nativeBalance === undefined || nativeBalance >= arbitrationCost;
+  const balanceIssues: string[] = [];
+
+  if (isConnected && onSepolia && !hasEnoughTokenBalance) {
+    balanceIssues.push(`Insufficient balance. Need ${tokenDecimals !== undefined ? formatUnits(deposit, tokenDecimals) : deposit.toString()} ${tokenSymbol || "TOKEN"} for the deposit.`);
+  }
+  if (isConnected && onSepolia && !hasEnoughNativeBalance) {
+    balanceIssues.push(`Insufficient balance. Need ${formatEther(arbitrationCost || 0n)} ETH for arbitration.`);
+  }
 
   async function ensureApprovalIfNeeded() {
     if (!needsApproval || approvalStepDone) return true;
@@ -222,6 +247,16 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
     }
   }
 
+  async function copyTokenAddress() {
+    if (!tokenAddress) return;
+    try {
+      await navigator.clipboard.writeText(tokenAddress);
+      toast.success("Token address copied.");
+    } catch {
+      toast.error("Failed to copy token address.");
+    }
+  }
+
   async function onSubmit() {
     if (!isConnected || !address) {
       toast.error("Connect your wallet to collateralize.");
@@ -241,6 +276,14 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
     }
     if (deposit < submissionMinDeposit) {
       toast.error("Deposit below submission minimum.");
+      return;
+    }
+    if (!hasEnoughTokenBalance) {
+      toast.error(`Insufficient ${tokenSymbol || "token"} balance.`);
+      return;
+    }
+    if (!hasEnoughNativeBalance) {
+      toast.error("Insufficient ETH balance.");
       return;
     }
     if (!columns?.length) {
@@ -297,7 +340,7 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
       const itemUri = await uploadJsonToIpfs(itemJson, { operation: "item", pinToGraph: false, filename: "item.json" });
       const hash = await writeContractAsync({
         address: registryAddress,
-        abi: PermanentGTCRAbi as any,
+        abi: PermanentGTCRAbi,
         functionName: "addItem",
         args: [itemUri, deposit],
         value: arbitrationCost,
@@ -426,7 +469,30 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
       {lockedKey ? null : null}
 
       <div className="space-y-2">
-        <Label>Stake deposit ({tokenSymbol || "token"})</Label>
+        <div className="flex items-center gap-2">
+          <Label>Stake deposit ({tokenSymbol || "token"})</Label>
+          {tokenAddress ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => void copyTokenAddress()}
+                  className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-[11px] text-muted-foreground transition hover:border-cyan-400/40 hover:text-cyan-200"
+                >
+                  <Copy className="h-3 w-3" />
+                  Token
+                </button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[320px]">
+                <div className="space-y-1">
+                  <div className="text-[11px] text-muted-foreground">Stake token address</div>
+                  <div className="break-all font-mono text-[11px]">{tokenAddress}</div>
+                  <div className="text-[11px] text-muted-foreground">Click to copy</div>
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
+        </div>
         <Input
           inputMode="decimal"
           placeholder={tokenDecimals !== undefined ? formatUnits(submissionMinDeposit, tokenDecimals) : submissionMinDeposit.toString()}
@@ -437,8 +503,12 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row">
-        <Button onClick={() => void onSubmit()} disabled={loading || !isConnected || !onSepolia || !(columns?.length)} className="sm:flex-1">
-          {loading ? "Working…" : needsApproval && !approvalStepDone ? `Approve ${tokenSymbol || "token"}` : "Submit"}
+        <Button
+          onClick={() => void onSubmit()}
+          disabled={loading || !isConnected || !onSepolia || !(columns?.length) || balanceIssues.length > 0}
+          className="sm:flex-1"
+        >
+          {loading ? "Working…" : balanceIssues.length > 0 ? "Insufficient balance" : needsApproval && !approvalStepDone ? `Approve ${tokenSymbol || "token"}` : "Submit"}
         </Button>
         {props.onCancel ? (
           <Button variant="outline" onClick={props.onCancel} disabled={loading}>
@@ -449,7 +519,11 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
 
       {!isConnected ? <div className="text-xs text-muted-foreground">Connect your wallet to continue.</div> : null}
       {isConnected && !onSepolia ? <div className="text-xs text-red-300">Wrong network. Switch to Sepolia.</div> : null}
+      {balanceIssues.map((issue) => (
+        <div key={issue} className="text-xs text-red-300">
+          {issue}
+        </div>
+      ))}
     </div>
   );
 }
-

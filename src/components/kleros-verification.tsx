@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useAccount, useChainId, useReadContract, useWriteContract } from "wagmi";
 import { sepolia } from "wagmi/chains";
 import { formatUnits } from "viem";
@@ -16,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { ReportAbuseDialog } from "@/components/reality/report-abuse-dialog";
 import { CollateralizeAgentDialog } from "@/components/pgtcr/collateralize-agent-dialog";
 import { ChallengeAgentDialog } from "@/components/pgtcr/challenge-agent-dialog";
+import { CurateLinkButton } from "@/components/pgtcr/curate-link-button";
 import { ERC20_ABI } from "@/lib/abi/erc20";
 import PermanentGTCRAbi from "@/lib/abi/PermanentGTCR.json";
 import type { AgentSubgraphNetwork } from "@/lib/agent-networks";
@@ -139,7 +139,7 @@ export function KlerosCurateVerification(props: {
 
     const withdrawingPeriod = useReadContract({
         address: (pgtcrRegistryAddress ?? undefined) as `0x${string}` | undefined,
-        abi: PermanentGTCRAbi as any,
+        abi: PermanentGTCRAbi,
         functionName: "withdrawingPeriod",
         query: { enabled: Boolean(pgtcrRegistryAddress) },
     }).data as bigint | undefined;
@@ -162,7 +162,8 @@ export function KlerosCurateVerification(props: {
         address &&
         submitter.toLowerCase() === address.toLowerCase() &&
         itemStatus &&
-        itemStatus !== "Absent"
+        itemStatus !== "Absent" &&
+        itemStatus !== "Disputed"
     );
 
     const canStartWithdraw = Boolean(canManageWithdraw && withdrawingTimestamp === 0);
@@ -185,12 +186,21 @@ export function KlerosCurateVerification(props: {
 
         setWithdrawing(true);
         try {
-            await writeContractAsync({
-                address: pgtcrRegistryAddress,
-                abi: PermanentGTCRAbi as any,
-                functionName: withdrawingTimestamp === 0 ? "startWithdrawItem" : "withdrawItem",
-                args: [data.itemID as `0x${string}`],
-            } as any);
+            if (withdrawingTimestamp === 0) {
+                await writeContractAsync({
+                    address: pgtcrRegistryAddress,
+                    abi: PermanentGTCRAbi,
+                    functionName: "startWithdrawItem",
+                    args: [data.itemID as `0x${string}`],
+                });
+            } else {
+                await writeContractAsync({
+                    address: pgtcrRegistryAddress,
+                    abi: PermanentGTCRAbi,
+                    functionName: "withdrawItem",
+                    args: [data.itemID as `0x${string}`],
+                });
+            }
             window.setTimeout(() => window.location.reload(), 1200);
         } finally {
             setWithdrawing(false);
@@ -223,6 +233,8 @@ export function KlerosCurateVerification(props: {
     }
 
     const collateralized = Boolean(data.found && data.itemID);
+    const isDisputed = Boolean(data.disputed || itemStatus === "Disputed");
+    const isWithdrawn = itemStatus === "Absent" && withdrawingTimestamp > 0;
 
     if (collateralized && data.itemID) {
         const stake =
@@ -233,18 +245,18 @@ export function KlerosCurateVerification(props: {
         return (
             <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
-                    <Badge className={data.verified ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-amber-500/15 text-amber-200 border-amber-500/30"}>
-                        {data.verified ? "Collateral verified" : "Collateral submitted"}
+                    <Badge className={isWithdrawn ? "bg-red-500/15 text-red-200 border-red-500/30" : isDisputed ? "bg-amber-500/15 text-amber-200 border-amber-500/30" : data.verified ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-amber-500/15 text-amber-200 border-amber-500/30"}>
+                        {isWithdrawn ? "Withdrawn" : isDisputed ? "Collateralized - currently disputed" : data.verified ? "Collateral verified" : "Collateral submitted"}
                     </Badge>
 
                     {stake !== null ? (
-                        <Badge variant="outline" className="font-mono">
+                        <Badge variant="outline" className={`font-mono ${isWithdrawn ? "line-through opacity-70" : ""}`}>
                             Collateralized:{" "}
                             {tokenDecimals !== undefined ? formatUnits(stake, tokenDecimals) : stake.toString()} {tokenSymbol || ""}
                         </Badge>
                     ) : null}
 
-                    <ChallengeAgentDialog itemID={data.itemID} />
+                    {!isDisputed && !isWithdrawn ? <ChallengeAgentDialog itemID={data.itemID} /> : null}
 
                     {canStartWithdraw ? (
                         <Button size="sm" variant="outline" onClick={() => (withdrawingTimestamp === 0 ? setWithdrawConfirmOpen(true) : void onWithdrawItem())} disabled={withdrawing || chainId !== sepolia.id}>
@@ -254,19 +266,29 @@ export function KlerosCurateVerification(props: {
 
                     {canFinalizeWithdraw ? (
                         <Button size="sm" variant="outline" onClick={() => void onWithdrawItem()} disabled={withdrawing || chainId !== sepolia.id}>
-                            {withdrawing ? "Withdrawing…" : "Withdraw"}
+                            {withdrawing ? "Executing…" : "Execute withdrawal"}
                         </Button>
                     ) : null}
 
                     {canManageWithdraw && withdrawingTimestamp > 0 && !canFinalizeWithdraw ? (
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Badge variant="secondary">Withdraw initiated by owner</Badge>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                During this period, the item is still registered and the owner remains expected to keep it compliant until withdrawal can be finalized.
-                            </TooltipContent>
-                        </Tooltip>
+                        <>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Badge variant="secondary">Withdraw initiated by owner</Badge>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    During this period, the item is still registered and the owner remains expected to keep it compliant until withdrawal can be finalized.
+                                </TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button size="sm" variant="outline" disabled>
+                                        Execute withdrawal
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Available once the withdrawal period ends.</TooltipContent>
+                            </Tooltip>
+                        </>
                     ) : null}
 
                 </div>
@@ -331,14 +353,9 @@ export function KlerosCurateVerification(props: {
                 network={props.network}
             />
 
-            <Link
-                href={data.curateRegistryUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="text-sm font-medium text-cyan-400 hover:text-cyan-300"
-            >
-                View registry
-            </Link>
+            <CurateLinkButton href="/verified" external={false} size="sm">
+                View Registry
+            </CurateLinkButton>
         </div>
     );
 }

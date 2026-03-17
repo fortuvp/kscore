@@ -1,18 +1,32 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ChallengeAgentDialog } from "@/components/pgtcr/challenge-agent-dialog";
+import { CurateLinkButton } from "@/components/pgtcr/curate-link-button";
+import { EvidenceSection } from "@/components/pgtcr/evidence-section";
+import { PgtcrDisputePanel } from "@/components/pgtcr/dispute-panel";
 import { useAccount, useChainId, useReadContract, useWriteContract } from "wagmi";
 import { sepolia } from "wagmi/chains";
 import { formatUnits } from "viem";
 import { ERC20_ABI } from "@/lib/abi/erc20";
 import PermanentGTCRAbi from "@/lib/abi/PermanentGTCR.json";
+
+type SubmissionItem = {
+  status: string;
+  stake: string;
+  submitter?: string;
+  withdrawingTimestamp?: string;
+};
+
+type PgtcrRegistry = {
+  id: string;
+  token: string;
+};
 
 function short(value?: string | null) {
   if (!value) return "-";
@@ -24,8 +38,8 @@ export default function SubmissionFallbackPage() {
   const itemID = decodeURIComponent(String(params.itemID || ""));
 
   const [loading, setLoading] = React.useState(true);
-  const [item, setItem] = React.useState<any | null>(null);
-  const [registry, setRegistry] = React.useState<any | null>(null);
+  const [item, setItem] = React.useState<SubmissionItem | null>(null);
+  const [registry, setRegistry] = React.useState<PgtcrRegistry | null>(null);
   const [withdrawing, setWithdrawing] = React.useState(false);
   const [withdrawConfirmOpen, setWithdrawConfirmOpen] = React.useState(false);
 
@@ -72,7 +86,7 @@ export default function SubmissionFallbackPage() {
 
   const withdrawingPeriod = useReadContract({
     address: (registry?.id ?? undefined) as `0x${string}` | undefined,
-    abi: PermanentGTCRAbi as any,
+    abi: PermanentGTCRAbi,
     functionName: "withdrawingPeriod",
     query: { enabled: Boolean(registry?.id) },
   }).data as bigint | undefined;
@@ -101,7 +115,8 @@ export default function SubmissionFallbackPage() {
       chainId === sepolia.id &&
       registry?.id &&
       itemStatus &&
-      itemStatus !== "Absent"
+      itemStatus !== "Absent" &&
+      itemStatus !== "Disputed"
   );
 
   const canStartWithdraw = Boolean(canManageWithdraw && withdrawingTimestamp === 0);
@@ -115,15 +130,24 @@ export default function SubmissionFallbackPage() {
 
 
   async function onWithdraw() {
-    if (!canManageWithdraw) return;
+    if (!canManageWithdraw || !registry?.id) return;
     setWithdrawing(true);
     try {
-      await writeContractAsync({
-        address: registry.id as `0x${string}` ,
-        abi: PermanentGTCRAbi as any,
-        functionName: withdrawingTimestamp === 0 ? "startWithdrawItem" : "withdrawItem",
-        args: [itemID as `0x${string}`],
-      } as any);
+      if (withdrawingTimestamp === 0) {
+        await writeContractAsync({
+          address: registry.id as `0x${string}`,
+          abi: PermanentGTCRAbi,
+          functionName: "startWithdrawItem",
+          args: [itemID as `0x${string}`],
+        });
+      } else {
+        await writeContractAsync({
+          address: registry.id as `0x${string}`,
+          abi: PermanentGTCRAbi,
+          functionName: "withdrawItem",
+          args: [itemID as `0x${string}`],
+        });
+      }
       window.setTimeout(() => window.location.reload(), 1000);
     } finally {
       setWithdrawing(false);
@@ -165,7 +189,7 @@ export default function SubmissionFallbackPage() {
 
             <div className="mt-4 flex flex-wrap items-center gap-2">
 
-              <ChallengeAgentDialog itemID={itemID} />
+              {itemStatus !== "Disputed" ? <ChallengeAgentDialog itemID={itemID} /> : null}
               {canStartWithdraw ? (
                 <Button size="sm" variant="outline" onClick={() => setWithdrawConfirmOpen(true)} disabled={withdrawing || chainId !== sepolia.id}>
                   {withdrawing ? "Starting…" : "Start withdraw"}
@@ -174,19 +198,29 @@ export default function SubmissionFallbackPage() {
 
               {canFinalizeWithdraw ? (
                 <Button size="sm" variant="outline" onClick={() => void onWithdraw()} disabled={withdrawing || chainId !== sepolia.id}>
-                  {withdrawing ? "Withdrawing…" : "Withdraw"}
+                  {withdrawing ? "Executing…" : "Execute withdrawal"}
                 </Button>
               ) : null}
 
               {canManageWithdraw && withdrawingTimestamp > 0 && !canFinalizeWithdraw ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge variant="secondary">Withdraw initiated by owner</Badge>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    During this period, the item is still registered and the owner remains expected to keep it compliant until withdrawal can be finalized.
-                  </TooltipContent>
-                </Tooltip>
+                <>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Badge variant="secondary">Withdraw initiated by owner</Badge>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      During this period, the item is still registered and the owner remains expected to keep it compliant until withdrawal can be finalized.
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button size="sm" variant="outline" disabled>
+                        Execute withdrawal
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Available once the withdrawal period ends.</TooltipContent>
+                  </Tooltip>
+                </>
               ) : null}
             </div>
           </div>
@@ -216,17 +250,19 @@ export default function SubmissionFallbackPage() {
               </DialogContent>
             </Dialog>
 
+          <PgtcrDisputePanel itemID={itemID} />
+
+          {registry?.id ? <EvidenceSection itemID={itemID} registryAddress={registry.id as `0x${string}`} /> : null}
+
           <div className="rounded-lg border border-cyan-400/25 bg-cyan-500/5 p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <div className="text-sm font-semibold text-cyan-200">Curate Item</div>
                 <div className="text-xs text-muted-foreground">Open the full item record in Curate.</div>
               </div>
-              <Button asChild variant="outline" size="sm" className="border-cyan-400/35 text-cyan-200 hover:bg-cyan-400/10">
-                <Link href={`https://curate.kleros.io/tcr/11155111/${registry?.id || ""}/${itemID}`} target="_blank" rel="noreferrer">
-                  View on Curate
-                </Link>
-              </Button>
+              <CurateLinkButton href={`https://curate.kleros.io/tcr/11155111/${registry?.id || ""}/${itemID}`}>
+                View on Curate
+              </CurateLinkButton>
             </div>
           </div>
         </div>

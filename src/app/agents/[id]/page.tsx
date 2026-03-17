@@ -24,6 +24,8 @@ import { toast } from "sonner";
 import type { AgentWithDetails } from "@/types/agent";
 import { truncateAddress, getDisplayName, formatDateTime, formatRelativeTime } from "@/lib/format";
 import { KlerosCurateVerification } from "@/components/kleros-verification";
+import { CurateLinkButton } from "@/components/pgtcr/curate-link-button";
+import { PgtcrDisputePanel } from "@/components/pgtcr/dispute-panel";
 import { EvidenceSection } from "@/components/pgtcr/evidence-section";
 import { CreateOfferDialog } from "@/components/marketplace/create-offer-dialog";
 import { useOffersForAgent } from "@/lib/marketplace/use-offers-for-agent";
@@ -402,9 +404,6 @@ export default function AgentDetailPage() {
         );
     }
 
-    if (pgtcrItem?.status === "Disputed") {
-        pushEvent(pgtcrItem.includedAt, "Challenged", "Collateral challenged", "Verification currently disputed", "warn");
-    }
     (pgtcrItem?.challenges || []).forEach((challenge, index) => {
         const n = (pgtcrItem?.challenges?.length || 0) - index;
         pushEvent(
@@ -558,6 +557,20 @@ export default function AgentDetailPage() {
                         <>
                         <div className="grid gap-6 lg:grid-cols-3">
                             <div className="space-y-6 lg:col-span-2">
+                                {curateItemId ? <PgtcrDisputePanel itemID={curateItemId} /> : null}
+
+                                {/* Evidence (Curate / PGTCR) */}
+                                {curateItemId && pgtcrRegistryAddress ? (
+                                    <EvidenceSection itemID={curateItemId} registryAddress={pgtcrRegistryAddress} />
+                                ) : (
+                                    <div className="rounded-lg border border-border p-6">
+                                        <h2 className="font-semibold">Evidence</h2>
+                                        <p className="mt-2 text-sm text-muted-foreground">
+                                            Evidence is available once the agent is collateralized in Curate.
+                                        </p>
+                                    </div>
+                                )}
+
                                 <div className="rounded-lg border border-border p-6">
                                     <div className="mb-4 flex items-center gap-2">
                                         <History className="h-5 w-5 text-cyan-300" />
@@ -605,18 +618,6 @@ export default function AgentDetailPage() {
                                         <p className="text-sm text-muted-foreground">No timeline events available yet.</p>
                                     )}
                                 </div>
-
-                                {/* Evidence (Curate / PGTCR) */}
-                                {curateItemId && pgtcrRegistryAddress ? (
-                                    <EvidenceSection itemID={curateItemId} registryAddress={pgtcrRegistryAddress} />
-                                ) : (
-                                    <div className="rounded-lg border border-border p-6">
-                                        <h2 className="font-semibold">Evidence</h2>
-                                        <p className="mt-2 text-sm text-muted-foreground">
-                                            Evidence is available once the agent is collateralized in Curate.
-                                        </p>
-                                    </div>
-                                )}
 
                                 {/* Reviews */}
                                 <div className="rounded-lg border border-border p-6">
@@ -940,11 +941,9 @@ export default function AgentDetailPage() {
                                             Open the canonical Curate record for this submission.
                                         </div>
                                     </div>
-                                    <Button asChild variant="outline" className="border-cyan-400/35 text-cyan-200 hover:bg-cyan-400/10">
-                                        <a href={curateViewUrl} target="_blank" rel="noreferrer">
-                                            View on Curate
-                                        </a>
-                                    </Button>
+                                    <CurateLinkButton href={curateViewUrl}>
+                                        View on Curate
+                                    </CurateLinkButton>
                                 </div>
                             </div>
                         ) : null}

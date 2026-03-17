@@ -40,6 +40,8 @@ type AgentPreview = {
   resolved: boolean;
 };
 
+type DisplayAgent = Parameters<typeof getDisplayName>[0];
+
 function isAccepted(item: PgtcrItemRow, nowSec: number): boolean {
   const includedAt = Number(item.includedAt);
   if (!Number.isFinite(includedAt) || includedAt <= 0) return false;
@@ -61,6 +63,10 @@ function mapStatus(item: PgtcrItemRow): VerifiedFilter {
   if (item.status === "Disputed") return "challenged";
   const now = Math.floor(Date.now() / 1000);
   return isAccepted(item, now) ? "active" : "challenged";
+}
+
+function isWithdrawn(item: Pick<PgtcrItemRow, "status" | "withdrawingTimestamp">) {
+  return item.status === "Absent" && Number(item.withdrawingTimestamp || "0") > 0;
 }
 
 function statusTone(status: VerifiedFilter) {
@@ -90,7 +96,6 @@ export default function VerifiedAgentsPage() {
   const [loading, setLoading] = React.useState(true);
   const [previewByKey, setPreviewByKey] = React.useState<Record<string, AgentPreview>>({});
   const [pgtcrToken, setPgtcrToken] = React.useState<`0x${string}` | null>(null);
-  const [pgtcrRegistryAddress, setPgtcrRegistryAddress] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -120,7 +125,6 @@ export default function VerifiedAgentsPage() {
         const json = await res.json();
         if (!cancelled && json?.success && json?.registry?.token) {
           setPgtcrToken(json.registry.token as `0x${string}`);
-          setPgtcrRegistryAddress(json.registry.id || null);
         }
       } catch {}
     }
@@ -203,7 +207,7 @@ export default function VerifiedAgentsPage() {
               { cache: "no-store" }
             );
             const json = await res.json();
-            const agent = (json?.agent || json?.item) as any;
+            const agent = (json?.agent || json?.item) as DisplayAgent | null;
             const name = agent ? getDisplayName(agent) : `Agent ${r.agentId}`;
             const image = agent?.registrationFile?.image || null;
             return [
@@ -347,7 +351,16 @@ export default function VerifiedAgentsPage() {
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <Badge className={statusTone(status)}>{status.toUpperCase()}</Badge>
                     {Number(item.withdrawingTimestamp || "0") > 0 ? (
-                      <Badge variant="outline" className="text-[11px] border-amber-400/30 bg-amber-500/10 text-amber-300">Withdrawing</Badge>
+                      <Badge
+                        variant="outline"
+                        className={
+                          isWithdrawn(item)
+                            ? "text-[11px] border-red-400/30 bg-red-500/10 text-red-300"
+                            : "text-[11px] border-amber-400/30 bg-amber-500/10 text-amber-300"
+                        }
+                      >
+                        {isWithdrawn(item) ? "Withdrawn" : "Withdrawing"}
+                      </Badge>
                     ) : null}
                   </div>
                 </div>

@@ -26,8 +26,20 @@ type StatsResponse = {
     reviews: number;
     averageQuality: number;
     truncated: boolean;
+    subgraphStatus: "live" | "error" | "timeout" | "missing";
+    error?: string;
+    envVarName: string;
+    subgraphId: string | null;
+    gatewayUrl: string | null;
   }>;
 };
+
+function getSubgraphBadge(status: StatsResponse["items"][number]["subgraphStatus"]) {
+  if (status === "live") return { label: "Live", className: "border-emerald-400/30 text-emerald-300" };
+  if (status === "timeout") return { label: "Timeout", className: "border-amber-400/30 text-amber-300" };
+  if (status === "error") return { label: "Error", className: "border-red-400/30 text-red-300" };
+  return { label: "Missing env", className: "border-red-400/30 text-red-300" };
+}
 
 export default function NetworksPage() {
   const [breakdown, setBreakdown] = React.useState<StatsResponse["items"]>([]);
@@ -91,13 +103,19 @@ export default function NetworksPage() {
               const counts = countMap.get(network);
               const coverage = totalAgents ? Math.round(((counts?.agents || 0) / totalAgents) * 100) : 0;
               const explorer = getExplorerBaseUrlByNetwork(network);
+              const statusBadge = getSubgraphBadge(counts?.subgraphStatus || "missing");
               return (
                 <section key={network} className="rounded-xl border border-border/50 bg-card/40 p-4">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <h2 className="text-lg font-semibold">{getAgentSubgraphLabel(network)}</h2>
-                      <div className="text-xs text-muted-foreground">
-                        Chain ID {AGENT_NETWORK_CHAIN_IDS[network]} | Env key {AGENT_SUBGRAPH_ENV_KEYS[network]}
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <span>Chain ID {AGENT_NETWORK_CHAIN_IDS[network]}</span>
+                        <span>|</span>
+                        <span>{counts?.envVarName || AGENT_SUBGRAPH_ENV_KEYS[network]}</span>
+                        <Badge variant="outline" className={statusBadge.className}>
+                          {statusBadge.label}
+                        </Badge>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -119,6 +137,23 @@ export default function NetworksPage() {
                   <div className="mb-4 text-xs text-muted-foreground">
                     {coverage}% of indexed agents are on this network.
                     {counts?.truncated ? " (capped while indexing very large datasets)" : ""}
+                  </div>
+
+                  {counts?.error ? (
+                    <div className="mb-4 rounded-lg border border-amber-400/20 bg-amber-500/10 p-2 text-xs text-amber-100/80">
+                      {counts.error}
+                    </div>
+                  ) : null}
+
+                  <div className="mb-4 grid gap-2 text-xs sm:grid-cols-2">
+                    <div className="rounded-lg border border-border/30 p-2">
+                      <div className="text-muted-foreground">Subgraph ID</div>
+                      <div className="mt-1 break-all font-mono">{counts?.subgraphId || "Missing"}</div>
+                    </div>
+                    <div className="rounded-lg border border-border/30 p-2">
+                      <div className="text-muted-foreground">Gateway</div>
+                      <div className="mt-1 break-all font-mono">{counts?.gatewayUrl || "Unavailable"}</div>
+                    </div>
                   </div>
 
                   <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">

@@ -1,13 +1,18 @@
 import { NextResponse } from "next/server";
 import { getNetworkSummary } from "@/lib/network-summary.server";
+import { describeAgentSubgraphConfig } from "@/lib/agent-subgraphs.server";
 
 export async function GET() {
   try {
     const data = await getNetworkSummary();
+    const items = data.map((item) => ({
+      ...item,
+      ...describeAgentSubgraphConfig(item.network),
+    }));
     return NextResponse.json({
       success: true,
       generatedAt: new Date().toISOString(),
-      items: data,
+      items,
     });
   } catch (error) {
     return NextResponse.json(
@@ -19,4 +24,3 @@ export async function GET() {
     );
   }
 }
-

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { useAccount, useChainId, useReadContract, useWriteContract } from "wagmi";
+import { useAccount, useBalance, useChainId, useReadContract, useWriteContract } from "wagmi";
 import { sepolia } from "wagmi/chains";
 import { formatEther, formatUnits } from "viem";
 
@@ -61,9 +61,6 @@ type ItemApiResponse =
     }
   | { success: false; error: string };
 
-const PARTY_REQUESTER = 1;
-const PARTY_CHALLENGER = 2;
-
 function mulDiv(a: bigint, b: bigint, div: bigint): bigint {
   if (div === 0n) return 0n;
   return (a * b) / div;
@@ -93,7 +90,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
 
   const multiplierDivisor = useReadContract({
     address: registryAddress,
-    abi: PermanentGTCRAbi as any,
+    abi: PermanentGTCRAbi,
     functionName: "MULTIPLIER_DIVISOR",
     query: { enabled: Boolean(registryAddress) },
   }).data as bigint | undefined;
@@ -136,7 +133,23 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
     query: { enabled: Boolean(address && tokenAddress && registryAddress) },
   }).data as bigint | undefined;
 
+  const tokenBalance = useReadContract({
+    address: tokenAddress,
+    abi: ERC20_ABI,
+    functionName: "balanceOf",
+    args: address ? [address] : undefined,
+    query: { enabled: Boolean(address && tokenAddress) },
+  }).data as bigint | undefined;
+
+  const nativeBalance = useBalance({
+    address,
+    chainId: sepolia.id,
+    query: { enabled: Boolean(address) },
+  }).data?.value;
+
   const needsApproval = Boolean(allowance !== undefined && allowance < requiredChallengeStake);
+  const hasEnoughTokenBalance = tokenBalance === undefined || tokenBalance >= requiredChallengeStake;
+  const hasEnoughNativeBalance = arbitrationCost === undefined || nativeBalance === undefined || nativeBalance >= arbitrationCost;
 
   React.useEffect(() => {
     if (!open) return;
@@ -204,6 +217,14 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
       toast.error("Arbitration cost not available.");
       return;
     }
+    if (!hasEnoughTokenBalance) {
+      toast.error(`Insufficient ${tokenSymbol || "token"} balance.`);
+      return;
+    }
+    if (!hasEnoughNativeBalance) {
+      toast.error("Insufficient ETH balance.");
+      return;
+    }
     if (needsApproval && !approvalStepDone) {
       await ensureApprovalIfNeeded();
       return;
@@ -238,7 +259,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
 
       await writeContractAsync({
         address: registryAddress,
-        abi: PermanentGTCRAbi as any,
+        abi: PermanentGTCRAbi,
         functionName: "challengeItem",
         args: [props.itemID as `0x${string}`, evidenceUri],
         value: arbitrationCost,
@@ -260,129 +281,13 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
 
   const latestChallenge = item && item.success && item.item ? item.item.challenges?.[0] : null;
   const activeDispute = latestChallenge && !latestChallenge.resolutionTime ? latestChallenge : null;
-  const latestRound = activeDispute?.rounds?.[0] || null;
+  const balanceIssues: string[] = [];
 
-  const disputeID = activeDispute ? BigInt(activeDispute.disputeID || "0") : 0n;
-
-  const appealCost = useReadContract({
-    address: arbitratorAddress,
-    abi: IARBITRATOR_ABI,
-    functionName: "appealCost",
-    args: activeDispute && arbitratorExtraData ? [disputeID, arbitratorExtraData] : undefined,
-    query: { enabled: Boolean(activeDispute && arbitratorAddress && arbitratorExtraData) },
-  }).data as bigint | undefined;
-
-  const winnerStakeMultiplier = registry && registry.success ? BigInt(registry.registry.winnerStakeMultiplier || "0") : 0n;
-  const loserStakeMultiplier = registry && registry.success ? BigInt(registry.registry.loserStakeMultiplier || "0") : 0n;
-  const sharedStakeMultiplier = registry && registry.success ? BigInt(registry.registry.sharedStakeMultiplier || "0") : 0n;
-
-  function multiplierForSide(side: number): bigint {
-    if (!latestRound) return sharedStakeMultiplier;
-    const ruling = latestRound.ruling;
-    if (ruling === "None") return sharedStakeMultiplier;
-
-    // Ruling enum in subgraph: None/Accept/Reject
-    const requesterWins = ruling === "Accept";
-    const sideIsRequester = side === PARTY_REQUESTER;
-    const sideWins = sideIsRequester ? requesterWins : !requesterWins;
-    return sideWins ? winnerStakeMultiplier : loserStakeMultiplier;
+  if (isConnected && onSepolia && !hasEnoughTokenBalance) {
+    balanceIssues.push(`Insufficient balance. Need ${tokenDecimals !== undefined ? formatUnits(requiredChallengeStake, tokenDecimals) : requiredChallengeStake.toString()} ${tokenSymbol || "TOKEN"} for the challenge stake.`);
   }
-
-  function totalFeeForSide(side: number): bigint {
-    if (!appealCost || !multiplierDivisor) return 0n;
-    const m = multiplierForSide(side);
-    return appealCost + mulDiv(appealCost, m, multiplierDivisor);
-  }
-
-
-  const nowSec = Math.floor(Date.now() / 1000);
-
-  function rulingKind(r: string | undefined): "none" | "requester" | "challenger" {
-    const v = String(r || "").toLowerCase();
-    if (!v || v === "none" || v === "0") return "none";
-    if (v === "accept" || v === "1" || v === "requester") return "requester";
-    if (v === "reject" || v === "2" || v === "challenger") return "challenger";
-    return "none";
-  }
-
-  function sideName(side: number) {
-    return side === PARTY_REQUESTER ? "Requester" : "Challenger";
-  }
-
-  function sideFundingState(side: number): { canFund: boolean; reason?: string } {
-    if (!activeDispute || !latestRound) return { canFund: false, reason: "No active appeal round." };
-
-    const start = Number(latestRound.appealPeriodStart || "0");
-    const end = Number(latestRound.appealPeriodEnd || "0");
-    if (!start || !end || nowSec < start) return { canFund: false, reason: "Appeal period not open yet." };
-
-    const rk = rulingKind(latestRound.ruling);
-    const sideIsRequester = side === PARTY_REQUESTER;
-
-    const hasPaid = sideIsRequester ? latestRound.hasPaidRequester : latestRound.hasPaidChallenger;
-    if (hasPaid) return { canFund: false, reason: "This side is already fully funded." };
-
-    const deadline = rk === "none"
-      ? end
-      : ((rk === "requester") === sideIsRequester ? end : Math.floor(start + (end - start) / 2));
-
-    if (nowSec >= deadline) {
-      return {
-        canFund: false,
-        reason: rk === "none" ? "Appeal period closed." : `Funding window closed for ${sideName(side)} side.`,
-      };
-    }
-
-    const paid = BigInt(sideIsRequester ? latestRound.amountPaidRequester : latestRound.amountPaidChallenger);
-    const total = totalFeeForSide(side);
-    if (total <= paid) return { canFund: false, reason: "This side is already fully funded." };
-
-    return { canFund: true };
-  }
-
-  async function onFundAppeal(side: number) {
-    if (!isConnected || !address) {
-      toast.error("Connect your wallet.");
-      return;
-    }
-    if (!onSepolia) {
-      toast.error("Switch to Sepolia.");
-      return;
-    }
-    if (!registryAddress || !activeDispute || !latestRound) {
-      toast.error("No active dispute.");
-      return;
-    }
-
-    const fundingState = sideFundingState(side);
-    if (!fundingState.canFund) {
-      toast.error(fundingState.reason || "Funding not available for this side right now.");
-      return;
-    }
-
-    const paid = BigInt(side === PARTY_REQUESTER ? latestRound.amountPaidRequester : latestRound.amountPaidChallenger);
-    const total = totalFeeForSide(side);
-    const remaining = total > paid ? total - paid : 0n;
-    if (remaining === 0n) {
-      toast.message("This side is already fully funded.");
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      await writeContractAsync({
-        address: registryAddress,
-        abi: PermanentGTCRAbi as any,
-        functionName: "fundAppeal",
-        args: [props.itemID as `0x${string}`, side],
-        value: remaining,
-      });
-      toast.success("Appeal contribution sent.");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Funding failed");
-    } finally {
-      setSubmitting(false);
-    }
+  if (isConnected && onSepolia && !hasEnoughNativeBalance) {
+    balanceIssues.push(`Insufficient balance. Need ${formatEther(arbitrationCost || 0n)} ETH for arbitration.`);
   }
 
   return (
@@ -410,50 +315,6 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
             </div>
           </div>
 
-          {activeDispute ? (
-            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-4">
-              <div className="font-medium text-amber-200">Dispute active</div>
-              <div className="mt-1 text-xs text-amber-200/80 space-y-1">
-                <div>Dispute ID: <span className="font-mono">{activeDispute.disputeID}</span></div>
-                <div>Challenger: <span className="font-mono">{activeDispute.challenger}</span></div>
-                {latestRound ? (
-                  <>
-                    <div>Appeal period end: <span className="font-mono">{new Date(Number(latestRound.appealPeriodEnd) * 1000).toLocaleString()}</span></div>
-                    <div>Ruling: <span className="font-mono">{latestRound.ruling}</span></div>
-                  </>
-                ) : null}
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void onFundAppeal(PARTY_REQUESTER)}
-                    disabled={submitting || !sideFundingState(PARTY_REQUESTER).canFund}
-                    title={sideFundingState(PARTY_REQUESTER).reason}
-                  >
-                    Fund appeal (Requester)
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void onFundAppeal(PARTY_CHALLENGER)}
-                    disabled={submitting || !sideFundingState(PARTY_CHALLENGER).canFund}
-                    title={sideFundingState(PARTY_CHALLENGER).reason}
-                  >
-                    Fund appeal (Challenger)
-                  </Button>
-                <div className="text-[11px] text-amber-200/80">
-                  Loser side can only fund in the first half of the appeal period; winner side can fund until period end.
-                </div>
-                  <Button asChild size="sm" variant="outline">
-                    <a href={`https://klerosboard.com/#!/dispute/${sepolia.id}/${activeDispute.disputeID}`} target="_blank" rel="noreferrer">
-                      Klerosboard
-                    </a>
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
           <div className="space-y-2">
             <Label>Evidence title</Label>
             <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Short summary" />
@@ -473,17 +334,31 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row">
-            <Button className="sm:flex-1" onClick={() => void onChallenge()} disabled={submitting || !isConnected || !onSepolia}>
+            <Button
+              className="sm:flex-1"
+              onClick={() => void onChallenge()}
+              disabled={submitting || !isConnected || !onSepolia || Boolean(activeDispute) || balanceIssues.length > 0}
+            >
               {submitting
                 ? "Working…"
-                : needsApproval && !approvalStepDone
-                  ? `Approve ${tokenSymbol || "token"}`
-                  : "Challenge"}
+                : activeDispute
+                  ? "Dispute active"
+                  : balanceIssues.length > 0
+                    ? "Insufficient balance"
+                    : needsApproval && !approvalStepDone
+                      ? `Approve ${tokenSymbol || "token"}`
+                      : "Challenge"}
             </Button>
           </div>
 
           {!isConnected ? <div className="text-xs text-muted-foreground">Connect your wallet to continue.</div> : null}
           {isConnected && !onSepolia ? <div className="text-xs text-red-300">Wrong network. Switch to Sepolia.</div> : null}
+          {activeDispute ? <div className="text-xs text-amber-300">This item is already disputed. Use the dispute panel on the page to fund appeals or inspect the case.</div> : null}
+          {balanceIssues.map((issue) => (
+            <div key={issue} className="text-xs text-red-300">
+              {issue}
+            </div>
+          ))}
         </div>
       </DialogContent>
     </Dialog>

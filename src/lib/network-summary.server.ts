@@ -17,6 +17,8 @@ export type NetworkSummary = {
   reviews: number;
   averageQuality: number;
   truncated: boolean;
+  subgraphStatus: "live" | "error" | "timeout" | "missing";
+  error?: string;
 };
 
 type CacheRecord = {
@@ -25,8 +27,11 @@ type CacheRecord = {
 };
 
 const PAGE_SIZE = 1000;
-const MAX_PAGES = 200;
+// The Graph gateway rejects `skip` values above 5000. Keep the scan within the
+// supported range and mark large datasets as truncated instead of erroring.
+const MAX_PAGES = 6;
 const CACHE_TTL_MS = 2 * 60_000;
+const NETWORK_TIMEOUT_MS = 15_000;
 
 let cache: CacheRecord | null = null;
 
@@ -80,7 +85,38 @@ async function summarizeNetwork(network: AgentSubgraphNetwork): Promise<NetworkS
     reviews,
     averageQuality: totalAgents ? Math.round(qualitySum / totalAgents) : 0,
     truncated,
+    subgraphStatus: "live",
   };
+}
+
+function emptySummary(network: AgentSubgraphNetwork, subgraphStatus: NetworkSummary["subgraphStatus"], error?: string): NetworkSummary {
+  return {
+    network,
+    label: getAgentSubgraphLabel(network),
+    agents: 0,
+    active7d: 0,
+    new24h: 0,
+    reviews: 0,
+    averageQuality: 0,
+    truncated: false,
+    subgraphStatus,
+    error,
+  };
+}
+
+async function summarizeNetworkSafe(network: AgentSubgraphNetwork): Promise<NetworkSummary> {
+  try {
+    return await Promise.race([
+      summarizeNetwork(network),
+      new Promise<NetworkSummary>((resolve) => {
+        setTimeout(() => resolve(emptySummary(network, "timeout", "Timed out while querying the subgraph.")), NETWORK_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to query subgraph";
+    const subgraphStatus = message.includes("Missing env var") ? "missing" : "error";
+    return emptySummary(network, subgraphStatus, message);
+  }
 }
 
 export async function getNetworkSummary(force = false): Promise<NetworkSummary[]> {
@@ -88,7 +124,7 @@ export async function getNetworkSummary(force = false): Promise<NetworkSummary[]
     return cache.data;
   }
 
-  const summaries = await Promise.all(AGENT_SUBGRAPH_NETWORKS.map((network) => summarizeNetwork(network)));
+  const summaries = await Promise.all(AGENT_SUBGRAPH_NETWORKS.map((network) => summarizeNetworkSafe(network)));
   const sorted = summaries.sort((a, b) => b.agents - a.agents);
   cache = {
     data: sorted,
@@ -96,4 +132,3 @@ export async function getNetworkSummary(force = false): Promise<NetworkSummary[]
   };
   return sorted;
 }
-

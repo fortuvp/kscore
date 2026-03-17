@@ -183,7 +183,7 @@ function SubmitEvidenceDialog(props: {
 
       await writeContractAsync({
         address: props.registryAddress,
-        abi: PermanentGTCRAbi as any,
+        abi: PermanentGTCRAbi,
         functionName: "submitEvidence",
         args: [props.itemID as `0x${string}`, evidenceUri],
       });
