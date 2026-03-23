@@ -2,6 +2,10 @@ import { GraphQLClient, gql } from "graphql-request";
 import type { Agent, Feedback, AgentStats, AgentWithDetails } from "@/types/agent";
 import type { AgentSubgraphNetwork } from "@/lib/agent-networks";
 import { getAgentSubgraphUrl } from "@/lib/agent-subgraphs.server";
+import {
+    getReputationFeedbackRequestSize,
+    refreshAgentFeedbackFromChain,
+} from "@/lib/reputation-feedback.server";
 
 // Re-export types for convenience
 export type { Agent, Feedback, AgentStats, AgentWithDetails };
@@ -225,10 +229,10 @@ const GET_AGENT_WITH_FEEDBACK_NO_STATS = gql`
 `;
 
 const GET_AGENT_BY_AGENT_ID = gql`
-  query GetAgentByAgentId($agentId: String!) {
+  query GetAgentByAgentId($agentId: String!, $feedbackFirst: Int!) {
     agents(where: { agentId: $agentId }, first: 1) {
       ${AGENT_FIELDS_FULL}
-      feedback(where: { isRevoked: false }, orderBy: createdAt, orderDirection: desc, first: 10) {
+      feedback(where: { isRevoked: false }, orderBy: createdAt, orderDirection: desc, first: $feedbackFirst) {
         id
         value
         tag1
@@ -258,10 +262,10 @@ const GET_AGENT_BY_AGENT_ID = gql`
 `;
 
 const GET_AGENT_BY_AGENT_ID_NO_STATS = gql`
-  query GetAgentByAgentIdNoStats($agentId: String!) {
+  query GetAgentByAgentIdNoStats($agentId: String!, $feedbackFirst: Int!) {
     agents(where: { agentId: $agentId }, first: 1) {
       ${AGENT_FIELDS_FULL}
-      feedback(where: { isRevoked: false }, orderBy: createdAt, orderDirection: desc, first: 10) {
+      feedback(where: { isRevoked: false }, orderBy: createdAt, orderDirection: desc, first: $feedbackFirst) {
         id
         value
         tag1
@@ -379,50 +383,59 @@ export async function getAgentWithFeedback(
     feedbackFirst: number = 10,
     network: AgentSubgraphNetwork = "sepolia"
 ): Promise<AgentWithDetails | null> {
+    const requestedFeedbackFirst = getReputationFeedbackRequestSize(network, feedbackFirst);
+
     try {
         const response = await getClient(network).request<{
             agent: (Agent & { feedback: Feedback[] }) | null;
             agentStats: AgentStats | null;
-        }>(GET_AGENT_WITH_FEEDBACK, { id, feedbackFirst });
+        }>(GET_AGENT_WITH_FEEDBACK, { id, feedbackFirst: requestedFeedbackFirst });
 
         if (!response.agent) return null;
 
-        return { ...response.agent, stats: response.agentStats };
+        const agent = { ...response.agent, stats: response.agentStats };
+        return refreshAgentFeedbackFromChain(network, agent, feedbackFirst);
     } catch (error) {
         if (!isMissingAgentStatsField(error)) throw error;
 
         const fallbackResponse = await getClient(network).request<{
             agent: (Agent & { feedback: Feedback[] }) | null;
-        }>(GET_AGENT_WITH_FEEDBACK_NO_STATS, { id, feedbackFirst });
+        }>(GET_AGENT_WITH_FEEDBACK_NO_STATS, { id, feedbackFirst: requestedFeedbackFirst });
 
         if (!fallbackResponse.agent) return null;
 
-        return { ...fallbackResponse.agent, stats: null };
+        const agent = { ...fallbackResponse.agent, stats: null };
+        return refreshAgentFeedbackFromChain(network, agent, feedbackFirst);
     }
 }
 
 export async function getAgentByAgentId(
     agentId: string,
-    network: AgentSubgraphNetwork = "sepolia"
+    network: AgentSubgraphNetwork = "sepolia",
+    feedbackFirst: number = 10
 ): Promise<AgentWithDetails | null> {
+    const requestedFeedbackFirst = getReputationFeedbackRequestSize(network, feedbackFirst);
+
     try {
         const response = await getClient(network).request<{
             agents: (Agent & { feedback: Feedback[] })[];
             agentStats: AgentStats | null;
-        }>(GET_AGENT_BY_AGENT_ID, { agentId });
+        }>(GET_AGENT_BY_AGENT_ID, { agentId, feedbackFirst: requestedFeedbackFirst });
 
         if (!response.agents || response.agents.length === 0) return null;
 
-        return { ...response.agents[0], stats: response.agentStats };
+        const agent = { ...response.agents[0], stats: response.agentStats };
+        return refreshAgentFeedbackFromChain(network, agent, feedbackFirst);
     } catch (error) {
         if (!isMissingAgentStatsField(error)) throw error;
 
         const fallbackResponse = await getClient(network).request<{
             agents: (Agent & { feedback: Feedback[] })[];
-        }>(GET_AGENT_BY_AGENT_ID_NO_STATS, { agentId });
+        }>(GET_AGENT_BY_AGENT_ID_NO_STATS, { agentId, feedbackFirst: requestedFeedbackFirst });
 
         if (!fallbackResponse.agents || fallbackResponse.agents.length === 0) return null;
 
-        return { ...fallbackResponse.agents[0], stats: null };
+        const agent = { ...fallbackResponse.agents[0], stats: null };
+        return refreshAgentFeedbackFromChain(network, agent, feedbackFirst);
     }
 }

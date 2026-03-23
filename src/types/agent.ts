@@ -41,6 +41,7 @@ export interface Feedback {
     tag2: string | null;
     clientAddress: string;
     createdAt: string;
+    txHash?: string | null;
     feedbackFile: {
         text: string | null;
         mcpTool: string | null;

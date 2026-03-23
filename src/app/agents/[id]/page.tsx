@@ -39,7 +39,7 @@ import { useRealityQuestions } from "@/lib/reality/use-questions";
 import { bytes32ToYesNo } from "@/lib/reality/encoding";
 import { doesQuestionMatchAgent } from "@/lib/reality/question-match";
 import { getAgentChainLabel, isAgentSubgraphNetwork } from "@/lib/agent-networks";
-import { getAddressExplorerUrl, getAddressExplorerUrlForNetwork, getTxExplorerUrl, truncateHash } from "@/lib/block-explorer";
+import { getAddressExplorerUrl, getAddressExplorerUrlForNetwork, getTxExplorerUrl, getTxExplorerUrlForNetwork, truncateHash } from "@/lib/block-explorer";
 
 type Tab = "overview" | "metadata";
 
@@ -638,6 +638,13 @@ export default function AgentDetailPage() {
                                                 <div key={review.id} className="rounded-lg border border-border p-4">
                                                     <div className="flex items-start justify-between">
                                                         <div>
+                                                            {(() => {
+                                                                const reviewTxUrl = review.txHash
+                                                                    ? getTxExplorerUrl(review.txHash, agent.chainId) ||
+                                                                      getTxExplorerUrlForNetwork(review.txHash, network)
+                                                                    : null;
+                                                                return (
+                                                                    <>
                                                             <div className="flex items-center gap-2 text-sm">
                                                                 {(() => {
                                                                     const reviewerExplorerUrl = getAddressExplorerUrl(
@@ -663,6 +670,17 @@ export default function AgentDetailPage() {
                                                                     {formatRelativeTime(review.createdAt)}
                                                                 </span>
                                                             </div>
+                                                            {reviewTxUrl ? (
+                                                                <a
+                                                                    href={reviewTxUrl}
+                                                                    target="_blank"
+                                                                    rel="noreferrer"
+                                                                    className="mt-2 inline-flex items-center gap-1 text-xs text-cyan-300 hover:text-cyan-200"
+                                                                >
+                                                                    Tx {truncateHash(review.txHash!)}
+                                                                    <ExternalLink className="h-3 w-3" />
+                                                                </a>
+                                                            ) : null}
                                                             <div className="mt-2 flex flex-wrap gap-1">
                                                                 {review.tag1 && (
                                                                     <Badge variant="secondary" className="text-xs">
@@ -680,6 +698,9 @@ export default function AgentDetailPage() {
                                                                     {review.feedbackFile.text}
                                                                 </p>
                                                             )}
+                                                                    </>
+                                                                );
+                                                            })()}
                                                         </div>
                                                         <div className="rounded-lg bg-emerald-500/20 px-3 py-2 text-center">
                                                             <div className="text-lg font-bold text-emerald-400">

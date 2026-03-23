@@ -55,6 +55,13 @@ NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=
 # Optional: custom Sepolia RPC
 NEXT_PUBLIC_SEPOLIA_RPC_URL=https://ethereum-sepolia.publicnode.com
 
+# Optional: dedicated server-side RPCs for reputation freshness fallback
+SEPOLIA_RPC_URL=
+ETHEREUM_RPC_URL=
+BASE_RPC_URL=
+BSC_RPC_URL=
+POLYGON_RPC_URL=
+
 # Curate backend
 ENVIO_SUBGRAPH_URL=
 
@@ -67,6 +74,14 @@ ETHEREUM_MAINNET_SUBGRAPH_KEY=
 BASE_MAINNET_SUBGRAPH_KEY=
 BSC_MAINNET_SUBGRAPH_KEY=
 POLYGON_MAINNET_SUBGRAPH_KEY=
+
+# Optional: on-chain reputation freshness fallback for agent detail APIs
+FEATURE_REPUTATION_RPC_FALLBACK=1
+FEATURE_REPUTATION_RPC_FALLBACK_SEPOLIA=
+FEATURE_REPUTATION_RPC_FALLBACK_ETHEREUM=
+FEATURE_REPUTATION_RPC_FALLBACK_BASE=
+FEATURE_REPUTATION_RPC_FALLBACK_BSC=
+FEATURE_REPUTATION_RPC_FALLBACK_POLYGON=
 ```
 
 ### Run
@@ -168,6 +183,34 @@ PGTCR acceptance rule (subgraph-side): an item displays as accepted when `status
 Agent browsing is powered by The Graph gateway using the subgraph key for the selected network.
 The API key is read from `.env` via `THEGRAPH_API_KEY`.
 
+## Reputation Freshness Fallback
+
+Agent detail APIs also support an optional on-chain fallback for feedback freshness on the supported browse networks:
+
+- Sepolia
+- Ethereum mainnet
+- Base mainnet
+- BSC mainnet
+- Polygon mainnet
+
+How it works:
+
+- The app still uses the configured subgraph as the primary source of truth.
+- If the subgraph is behind chain head, the detail fetch path merges newer `ReputationRegistry` events from RPC on top of the subgraph response.
+- This currently applies to agent detail lookups, not bulk list/stat endpoints.
+
+Configuration:
+
+- `FEATURE_REPUTATION_RPC_FALLBACK=1|0` turns the fallback on or off globally.
+- `FEATURE_REPUTATION_RPC_FALLBACK_<NETWORK>=1|0` overrides the global flag per network.
+- `SEPOLIA_RPC_URL`, `ETHEREUM_RPC_URL`, `BASE_RPC_URL`, `BSC_RPC_URL`, and `POLYGON_RPC_URL` let you provide dedicated server-side RPCs.
+- If a chain-specific RPC is not set, the server falls back to the default public RPC shipped by `viem` for that chain.
+
+Operational note:
+
+- This protects feedback/review freshness for single-agent detail requests when a subgraph lags.
+- It is intentionally scoped to keep the runtime cost and blast radius low.
+
 ## Resources
 
 Learn how to build and register on-chain agents:
@@ -178,4 +221,3 @@ Learn how to build and register on-chain agents:
 | [Registration Guide](https://github.com/erc-8004/best-practices/blob/main/Registration.md) | How to register agents with proper metadata |
 | [Reputation Guide](https://github.com/erc-8004/best-practices/blob/main/Reputation.md) | Feedback system and reputation signals |
 | [Agent0 SDK](https://sdk.ag0.xyz/) | SDK for building ERC-8004 agents |
-
