@@ -197,6 +197,7 @@ How it works:
 
 - The app still uses the configured subgraph as the primary source of truth.
 - If the subgraph is behind chain head, the detail fetch path merges newer `ReputationRegistry` events from RPC on top of the subgraph response.
+- For review cards on the single-agent page, the detail fetch path also tries to hydrate missing `feedbackFile` content directly from `feedbackURI` when the subgraph has not populated that file entity yet.
 - This currently applies to agent detail lookups, not bulk list/stat endpoints.
 
 Configuration:
@@ -209,6 +210,7 @@ Configuration:
 Operational note:
 
 - This protects feedback/review freshness for single-agent detail requests when a subgraph lags.
+- Review text hydration is best-effort and only works for fetchable JSON/IPFS feedback URIs. Null, custom-protocol, or access-controlled URIs remain unchanged.
 - It is intentionally scoped to keep the runtime cost and blast radius low.
 
 ## Resources

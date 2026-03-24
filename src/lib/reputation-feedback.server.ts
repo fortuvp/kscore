@@ -18,7 +18,11 @@ type FeedbackOverlay = {
   totalDelta: number;
   newestActivityAt: number | null;
   txHashes: Map<string, string>;
+  feedbackUris: Map<string, string>;
+  endpoints: Map<string, string>;
 };
+
+type FeedbackFilePayload = NonNullable<Feedback["feedbackFile"]>;
 
 type ReputationFallbackConfig = {
   chain: Chain;
@@ -33,6 +37,8 @@ const REPUTATION_FEEDBACK_OVERFETCH = 40;
 const HEAD_CACHE_TTL_MS = 15_000;
 const SUBGRAPH_META_CACHE_TTL_MS = 60_000;
 const LOG_CHUNK_SIZE = 50_000n;
+const FEEDBACK_FETCH_TIMEOUT_MS = 6_000;
+const IPFS_GATEWAY_BASE_URL = "https://cdn.kleros.link/ipfs/";
 
 const GET_SUBGRAPH_META = gql`
   query GetAgentSubgraphMeta {
@@ -256,6 +262,191 @@ function trimFeedback(agent: AgentWithDetails, feedbackFirst: number): AgentWith
   };
 }
 
+function readOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function readOptionalStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getFeedbackUriFetchUrl(uri: string): string | null {
+  const trimmed = uri.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+  if (trimmed.startsWith("ipfs://")) return `${IPFS_GATEWAY_BASE_URL}${trimmed.slice("ipfs://".length)}`;
+  if (trimmed.startsWith("/ipfs/")) return `https://cdn.kleros.link${trimmed}`;
+  if (trimmed.startsWith("Qm") || trimmed.startsWith("baf")) return `${IPFS_GATEWAY_BASE_URL}${trimmed}`;
+
+  return null;
+}
+
+function normalizeFeedbackFilePayload(payload: unknown): FeedbackFilePayload | null {
+  if (!isRecord(payload)) return null;
+
+  const mcp = isRecord(payload.mcp) ? payload.mcp : null;
+  const a2a = isRecord(payload.a2a) ? payload.a2a : null;
+  const text = readOptionalString(payload.text);
+  const mcpTool = readOptionalString(mcp?.tool) ?? readOptionalString(payload.mcpTool);
+  const mcpPrompt = readOptionalString(mcp?.prompt) ?? readOptionalString(payload.mcpPrompt);
+  const mcpResource = readOptionalString(mcp?.resource) ?? readOptionalString(payload.mcpResource);
+  const a2aSkills = readOptionalStringArray(a2a?.skills ?? payload.a2aSkills);
+  const a2aContextId = readOptionalString(a2a?.contextId) ?? readOptionalString(payload.a2aContextId);
+  const a2aTaskId = readOptionalString(a2a?.taskId) ?? readOptionalString(payload.a2aTaskId);
+
+  if (!text && !mcpTool && !mcpPrompt && !mcpResource && a2aSkills.length === 0 && !a2aContextId && !a2aTaskId) {
+    return null;
+  }
+
+  return {
+    text,
+    mcpTool,
+    mcpPrompt,
+    mcpResource,
+    a2aSkills,
+    a2aContextId,
+    a2aTaskId,
+  };
+}
+
+function parseDataUriPayload(uri: string): unknown | null {
+  const trimmed = uri.trim();
+  if (!trimmed.startsWith("data:")) return null;
+
+  const separatorIndex = trimmed.indexOf(",");
+  if (separatorIndex === -1) return null;
+
+  const metadata = trimmed.slice(5, separatorIndex).toLowerCase();
+  const payload = trimmed.slice(separatorIndex + 1);
+  const decoded = metadata.includes(";base64")
+    ? Buffer.from(payload, "base64").toString("utf8")
+    : decodeURIComponent(payload);
+
+  return JSON.parse(decoded) as unknown;
+}
+
+async function fetchFeedbackFileFromUri(uri: string): Promise<FeedbackFilePayload | null> {
+  try {
+    const dataUriPayload = parseDataUriPayload(uri);
+    if (dataUriPayload !== null) {
+      return normalizeFeedbackFilePayload(dataUriPayload);
+    }
+  } catch {
+    return null;
+  }
+
+  const url = getFeedbackUriFetchUrl(uri);
+  if (!url) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FEEDBACK_FETCH_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+      headers: { accept: "application/json, text/plain;q=0.9, */*;q=0.1" },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) return null;
+
+    const contentType = response.headers.get("content-type")?.toLowerCase() || "";
+    if (contentType.includes("text/html")) return null;
+
+    const body = await response.text();
+    if (!body.trim()) return null;
+
+    const payload = JSON.parse(body) as unknown;
+    return normalizeFeedbackFilePayload(payload);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function mergeFeedbackFiles(
+  existing: Feedback["feedbackFile"],
+  fallback: Feedback["feedbackFile"]
+): Feedback["feedbackFile"] {
+  if (!fallback) return existing;
+  if (!existing) return fallback;
+
+  const merged = {
+    text: existing.text ?? fallback.text,
+    mcpTool: existing.mcpTool ?? fallback.mcpTool,
+    mcpPrompt: existing.mcpPrompt ?? fallback.mcpPrompt,
+    mcpResource: existing.mcpResource ?? fallback.mcpResource,
+    a2aSkills: existing.a2aSkills.length > 0 ? existing.a2aSkills : fallback.a2aSkills,
+    a2aContextId: existing.a2aContextId ?? fallback.a2aContextId,
+    a2aTaskId: existing.a2aTaskId ?? fallback.a2aTaskId,
+  };
+
+  if (
+    !merged.text &&
+    !merged.mcpTool &&
+    !merged.mcpPrompt &&
+    !merged.mcpResource &&
+    merged.a2aSkills.length === 0 &&
+    !merged.a2aContextId &&
+    !merged.a2aTaskId
+  ) {
+    return null;
+  }
+
+  return merged;
+}
+
+async function hydrateFeedbackFiles(
+  feedback: Feedback[],
+  overlayUris: Map<string, string>
+): Promise<Feedback[]> {
+  const uriCache = new Map<string, Promise<Feedback["feedbackFile"]>>();
+
+  return Promise.all(
+    feedback.map(async (item) => {
+      if (item.feedbackFile?.text) return item;
+
+      const feedbackUri = item.feedbackURI?.trim() || overlayUris.get(item.id)?.trim() || "";
+      if (!feedbackUri) return item;
+
+      let request = uriCache.get(feedbackUri);
+      if (!request) {
+        request = fetchFeedbackFileFromUri(feedbackUri);
+        uriCache.set(feedbackUri, request);
+      }
+
+      const feedbackFile = await request;
+      if (!feedbackFile) return item;
+
+      return {
+        ...item,
+        feedbackURI: item.feedbackURI || feedbackUri,
+        feedbackFile: mergeFeedbackFiles(item.feedbackFile, feedbackFile),
+      };
+    })
+  );
+}
+
+async function finalizeAgentFeedback(
+  agent: AgentWithDetails,
+  feedbackFirst: number,
+  overlayUris: Map<string, string>
+): Promise<AgentWithDetails> {
+  const trimmed = trimFeedback(agent, feedbackFirst);
+  const hydratedFeedback = await hydrateFeedbackFiles(trimmed.feedback, overlayUris);
+  return {
+    ...trimmed,
+    feedback: hydratedFeedback,
+  };
+}
+
 async function fetchFeedbackOverlay(
   network: AgentSubgraphNetwork,
   agentId: string,
@@ -280,6 +471,8 @@ async function fetchFeedbackOverlay(
   const config = REPUTATION_FALLBACK_CONFIGS[network];
   const needsOverlay = indexedBlock !== null && headBlock > indexedBlock;
   const txHashes = new Map<string, string>();
+  const feedbackUris = new Map<string, string>();
+  const endpoints = new Map<string, string>();
   if (!needsOverlay && targetFeedbackIds.size === 0) return null;
 
   const blockTimestampCache = new Map<bigint, number>();
@@ -323,7 +516,17 @@ async function fetchFeedbackOverlay(
       ]);
 
       for (const log of newFeedbackLogs) {
-        const { agentId: eventAgentId, clientAddress, feedbackIndex, value, valueDecimals, tag1, tag2 } = log.args;
+        const {
+          agentId: eventAgentId,
+          clientAddress,
+          feedbackIndex,
+          value,
+          valueDecimals,
+          tag1,
+          tag2,
+          endpoint,
+          feedbackURI,
+        } = log.args;
         if (
           eventAgentId === undefined ||
           clientAddress === undefined ||
@@ -337,6 +540,8 @@ async function fetchFeedbackOverlay(
         const feedbackId = buildFeedbackId(network, eventAgentId, clientAddress, feedbackIndex);
         createdIds.add(feedbackId);
         if (log.transactionHash) txHashes.set(feedbackId, log.transactionHash);
+        if (endpoint) endpoints.set(feedbackId, endpoint);
+        if (feedbackURI) feedbackUris.set(feedbackId, feedbackURI);
 
         const createdAt = await getBlockTimestamp(log.blockNumber);
         if (createdAt > newestActivityAt) newestActivityAt = createdAt;
@@ -346,8 +551,10 @@ async function fetchFeedbackOverlay(
           value: formatFeedbackValue(value, Number(valueDecimals)),
           tag1: tag1 || null,
           tag2: tag2 || null,
+          endpoint: endpoint || null,
           clientAddress: clientAddress.toLowerCase(),
           createdAt: createdAt.toString(),
+          feedbackURI: feedbackURI || null,
           txHash: log.transactionHash || null,
           feedbackFile: null,
         });
@@ -386,7 +593,7 @@ async function fetchFeedbackOverlay(
 
     for (let index = logs.length - 1; index >= 0; index -= 1) {
       const log = logs[index];
-      const { agentId: eventAgentId, clientAddress, feedbackIndex } = log.args;
+      const { agentId: eventAgentId, clientAddress, feedbackIndex, endpoint, feedbackURI } = log.args;
       if (
         eventAgentId === undefined ||
         clientAddress === undefined ||
@@ -399,6 +606,8 @@ async function fetchFeedbackOverlay(
       const feedbackId = buildFeedbackId(network, eventAgentId, clientAddress, feedbackIndex);
       if (!unresolvedTxIds.has(feedbackId)) continue;
       txHashes.set(feedbackId, log.transactionHash);
+      if (endpoint) endpoints.set(feedbackId, endpoint);
+      if (feedbackURI) feedbackUris.set(feedbackId, feedbackURI);
       unresolvedTxIds.delete(feedbackId);
       if (unresolvedTxIds.size === 0) break;
     }
@@ -421,6 +630,8 @@ async function fetchFeedbackOverlay(
     totalDelta,
     newestActivityAt: newestActivityAt > 0 ? newestActivityAt : null,
     txHashes,
+    feedbackUris,
+    endpoints,
   };
 }
 
@@ -438,15 +649,30 @@ export async function refreshAgentFeedbackFromChain(
   agent: AgentWithDetails,
   feedbackFirst: number
 ): Promise<AgentWithDetails> {
+  let mergedAgent: AgentWithDetails = trimFeedback(agent, feedbackFirst);
+  let overlayUris = new Map<string, string>();
+
   try {
     const targetFeedbackIds = new Set(agent.feedback.map((item) => item.id));
     const overlay = await fetchFeedbackOverlay(network, agent.agentId, targetFeedbackIds);
-    if (!overlay) return trimFeedback(agent, feedbackFirst);
+    if (!overlay) return finalizeAgentFeedback(mergedAgent, feedbackFirst, overlayUris);
 
     const merged = new Map<string, Feedback>();
     for (const item of agent.feedback) {
       const txHash = overlay.txHashes.get(item.id);
-      merged.set(item.id, txHash ? { ...item, txHash } : item);
+      const endpoint = overlay.endpoints.get(item.id);
+      const feedbackURI = overlay.feedbackUris.get(item.id);
+      merged.set(
+        item.id,
+        txHash || feedbackURI || endpoint
+          ? {
+              ...item,
+              endpoint: endpoint || item.endpoint || null,
+              txHash: txHash || item.txHash || null,
+              feedbackURI: feedbackURI || item.feedbackURI || null,
+            }
+          : item
+      );
     }
 
     for (const feedbackId of overlay.revokedIds) {
@@ -461,25 +687,34 @@ export async function refreshAgentFeedbackFromChain(
           ? {
               ...existing,
               ...item,
+              endpoint: item.endpoint || existing.endpoint || null,
+              feedbackURI: item.feedbackURI || existing.feedbackURI || null,
               txHash: item.txHash || existing.txHash || null,
-              feedbackFile: existing.feedbackFile || item.feedbackFile,
+              feedbackFile: mergeFeedbackFiles(existing.feedbackFile, item.feedbackFile),
             }
           : item
       );
     }
 
-    const mergedFeedback = Array.from(merged.values()).sort(compareFeedbackDesc).slice(0, feedbackFirst);
+    overlayUris = overlay.feedbackUris;
+    const mergedFeedback = Array.from(merged.values()).sort(compareFeedbackDesc);
     const totalFeedbackBase = Number.parseInt(agent.totalFeedback, 10) || 0;
     const lastActivityBase = Number.parseInt(agent.lastActivity, 10) || 0;
     const lastActivity = Math.max(lastActivityBase, overlay.newestActivityAt || 0);
 
-    return {
+    mergedAgent = {
       ...agent,
       totalFeedback: String(Math.max(0, totalFeedbackBase + overlay.totalDelta)),
       lastActivity: String(lastActivity || lastActivityBase),
       feedback: mergedFeedback,
     };
   } catch {
-    return trimFeedback(agent, feedbackFirst);
+    mergedAgent = trimFeedback(agent, feedbackFirst);
+  }
+
+  try {
+    return await finalizeAgentFeedback(mergedAgent, feedbackFirst, overlayUris);
+  } catch {
+    return trimFeedback(mergedAgent, feedbackFirst);
   }
 }

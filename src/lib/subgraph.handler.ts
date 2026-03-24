@@ -179,8 +179,10 @@ const GET_AGENT_WITH_FEEDBACK = gql`
         value
         tag1
         tag2
+        endpoint
         clientAddress
         createdAt
+        feedbackURI
         feedbackFile {
           text
           mcpTool
@@ -212,8 +214,10 @@ const GET_AGENT_WITH_FEEDBACK_NO_STATS = gql`
         value
         tag1
         tag2
+        endpoint
         clientAddress
         createdAt
+        feedbackURI
         feedbackFile {
           text
           mcpTool
@@ -237,8 +241,10 @@ const GET_AGENT_BY_AGENT_ID = gql`
         value
         tag1
         tag2
+        endpoint
         clientAddress
         createdAt
+        feedbackURI
         feedbackFile {
           text
           mcpTool
@@ -270,8 +276,10 @@ const GET_AGENT_BY_AGENT_ID_NO_STATS = gql`
         value
         tag1
         tag2
+        endpoint
         clientAddress
         createdAt
+        feedbackURI
         feedbackFile {
           text
           mcpTool

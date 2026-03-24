@@ -40,6 +40,7 @@ import { bytes32ToYesNo } from "@/lib/reality/encoding";
 import { doesQuestionMatchAgent } from "@/lib/reality/question-match";
 import { getAgentChainLabel, isAgentSubgraphNetwork } from "@/lib/agent-networks";
 import { getAddressExplorerUrl, getAddressExplorerUrlForNetwork, getTxExplorerUrl, getTxExplorerUrlForNetwork, truncateHash } from "@/lib/block-explorer";
+import { ipfsToGatewayUrl } from "@/lib/ipfs";
 
 type Tab = "overview" | "metadata";
 
@@ -48,6 +49,28 @@ function looksLikeAgentId(value: string): boolean {
     if (!trimmed) return false;
     if (trimmed.startsWith("eip155:")) return true;
     return /^\d+$/.test(trimmed);
+}
+
+function getFeedbackSourceUrl(uri: string | null | undefined): string | null {
+    const trimmed = uri?.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+    if (
+        trimmed.startsWith("ipfs://") ||
+        trimmed.startsWith("/ipfs/") ||
+        trimmed.startsWith("Qm") ||
+        trimmed.startsWith("baf")
+    ) {
+        return ipfsToGatewayUrl(trimmed);
+    }
+    return null;
+}
+
+function getFeedbackEndpointUrl(endpoint: string | null | undefined): string | null {
+    const trimmed = endpoint?.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+    return null;
 }
 
 export default function AgentDetailPage() {
@@ -643,6 +666,8 @@ export default function AgentDetailPage() {
                                                                     ? getTxExplorerUrl(review.txHash, agent.chainId) ||
                                                                       getTxExplorerUrlForNetwork(review.txHash, network)
                                                                     : null;
+                                                                const reviewEndpointUrl = getFeedbackEndpointUrl(review.endpoint);
+                                                                const reviewFeedbackUrl = getFeedbackSourceUrl(review.feedbackURI);
                                                                 return (
                                                                     <>
                                                             <div className="flex items-center gap-2 text-sm">
@@ -670,23 +695,33 @@ export default function AgentDetailPage() {
                                                                     {formatRelativeTime(review.createdAt)}
                                                                 </span>
                                                             </div>
-                                                            {reviewTxUrl ? (
-                                                                <a
-                                                                    href={reviewTxUrl}
-                                                                    target="_blank"
-                                                                    rel="noreferrer"
-                                                                    className="mt-2 inline-flex items-center gap-1 text-xs text-cyan-300 hover:text-cyan-200"
-                                                                >
-                                                                    Tx {truncateHash(review.txHash!)}
-                                                                    <ExternalLink className="h-3 w-3" />
-                                                                </a>
+                                                            {reviewTxUrl || reviewFeedbackUrl ? (
+                                                                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+                                                                    {reviewTxUrl ? (
+                                                                        <a
+                                                                            href={reviewTxUrl}
+                                                                            target="_blank"
+                                                                            rel="noreferrer"
+                                                                            className="inline-flex items-center gap-1 text-cyan-300 hover:text-cyan-200"
+                                                                        >
+                                                                            Tx {truncateHash(review.txHash!)}
+                                                                            <ExternalLink className="h-3 w-3" />
+                                                                        </a>
+                                                                    ) : null}
+                                                                    {reviewFeedbackUrl ? (
+                                                                        <a
+                                                                            href={reviewFeedbackUrl}
+                                                                            target="_blank"
+                                                                            rel="noreferrer"
+                                                                            className="inline-flex items-center gap-1 text-sky-300 hover:text-sky-200"
+                                                                        >
+                                                                            Feedback Source
+                                                                            <ExternalLink className="h-3 w-3" />
+                                                                        </a>
+                                                                    ) : null}
+                                                                </div>
                                                             ) : null}
                                                             <div className="mt-2 flex flex-wrap gap-1">
-                                                                {review.tag1 && (
-                                                                    <Badge variant="secondary" className="text-xs">
-                                                                        {review.tag1}
-                                                                    </Badge>
-                                                                )}
                                                                 {review.tag2 && (
                                                                     <Badge variant="secondary" className="text-xs">
                                                                         {review.tag2}
@@ -698,11 +733,40 @@ export default function AgentDetailPage() {
                                                                     {review.feedbackFile.text}
                                                                 </p>
                                                             )}
+                                                            {review.endpoint && (
+                                                                <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                                                                    <span>via:</span>
+                                                                    {reviewEndpointUrl ? (
+                                                                        <a
+                                                                            href={reviewEndpointUrl}
+                                                                            target="_blank"
+                                                                            rel="noreferrer"
+                                                                            className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 font-mono text-[11px] text-foreground hover:bg-muted/80"
+                                                                            title={review.endpoint}
+                                                                        >
+                                                                            {review.endpoint}
+                                                                            <ExternalLink className="h-3 w-3" />
+                                                                        </a>
+                                                                    ) : (
+                                                                        <span
+                                                                            className="rounded-full bg-muted px-2 py-1 font-mono text-[11px] text-foreground"
+                                                                            title={review.endpoint}
+                                                                        >
+                                                                            {review.endpoint}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            )}
                                                                     </>
                                                                 );
                                                             })()}
                                                         </div>
                                                         <div className="rounded-lg bg-emerald-500/20 px-3 py-2 text-center">
+                                                            {review.tag1 && (
+                                                                <div className="mb-1 text-[10px] font-semibold tracking-[0.12em] text-emerald-300/80">
+                                                                    {review.tag1.toUpperCase()}
+                                                                </div>
+                                                            )}
                                                             <div className="text-lg font-bold text-emerald-400">
                                                                 {review.value}
                                                             </div>
