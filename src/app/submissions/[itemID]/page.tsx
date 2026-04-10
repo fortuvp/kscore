@@ -26,6 +26,8 @@ type SubmissionItem = {
 type PgtcrRegistry = {
   id: string;
   token: string;
+  tokenSymbol?: string | null;
+  tokenDecimals?: number | null;
 };
 
 function short(value?: string | null) {
@@ -83,6 +85,8 @@ export default function SubmissionFallbackPage() {
     functionName: "decimals",
     query: { enabled: Boolean(tokenAddress) },
   }).data as number | undefined;
+  const resolvedTokenDecimals = tokenDecimals ?? registry?.tokenDecimals ?? 18;
+  const resolvedTokenSymbol = tokenSymbol || registry?.tokenSymbol || "";
 
   const withdrawingPeriod = useReadContract({
     address: (registry?.id ?? undefined) as `0x${string}` | undefined,
@@ -180,7 +184,7 @@ export default function SubmissionFallbackPage() {
               <Badge variant="outline">{String(item.status || "Unknown")}</Badge>
               <Badge variant="outline" className="font-mono">ItemID {short(itemID)}</Badge>
               <Badge variant="outline" className="font-mono">
-                Collateral {tokenDecimals !== undefined ? formatUnits(collateral, tokenDecimals) : collateral.toString()} {tokenSymbol || ""}
+                Collateral {formatUnits(collateral, resolvedTokenDecimals)} {resolvedTokenSymbol}
               </Badge>
             </div>
             <div className="mt-3 text-sm text-muted-foreground">

@@ -114,6 +114,29 @@ export default function AgentDetailPage() {
             setCurateFallbackUrl(null);
             setFallbackItemId(null);
             try {
+                const resolvePayloadAgent = async (payload: { agent?: AgentWithDetails; item?: AgentWithDetails } | null | undefined) => {
+                    const resolved = (payload?.agent || payload?.item) as AgentWithDetails | undefined;
+                    if (!resolved) return null;
+
+                    const detailId = resolved.id?.trim();
+                    if (!detailId) return resolved;
+
+                    try {
+                        const detailResponse = await fetch(
+                            `/api/agents/${encodeURIComponent(detailId)}?network=${encodeURIComponent(network)}`,
+                            { cache: "no-store" }
+                        );
+                        const detailData = await detailResponse.json();
+                        if (detailData?.success && detailData?.agent) {
+                            return detailData.agent as AgentWithDetails;
+                        }
+                    } catch {
+                        // fall back to the already-resolved payload below
+                    }
+
+                    return resolved;
+                };
+
                 const shouldTryAgentIdFirst = lookup === "agentId" || looksLikeAgentId(id);
                 const primaryUrl = shouldTryAgentIdFirst
                     ? `/api/agents/by-agent-id?agentId=${encodeURIComponent(id)}&network=${encodeURIComponent(network)}`
@@ -123,7 +146,8 @@ export default function AgentDetailPage() {
                 const primaryData = await primaryResponse.json();
 
                 if (primaryData?.success && (primaryData?.agent || primaryData?.item)) {
-                    setAgent((primaryData.agent || primaryData.item) as AgentWithDetails);
+                    const resolvedAgent = await resolvePayloadAgent(primaryData);
+                    setAgent(resolvedAgent);
                     return;
                 }
 
@@ -134,7 +158,8 @@ export default function AgentDetailPage() {
                 const fallbackData = await fallbackResponse.json();
 
                 if (fallbackData?.success && (fallbackData?.agent || fallbackData?.item)) {
-                    setAgent((fallbackData.agent || fallbackData.item) as AgentWithDetails);
+                    const resolvedAgent = await resolvePayloadAgent(fallbackData);
+                    setAgent(resolvedAgent);
                 } else {
                     setError(fallbackData?.error || primaryData?.error || "Failed to load agent");
                     if (shouldTryAgentIdFirst) {

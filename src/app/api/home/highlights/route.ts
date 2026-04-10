@@ -320,10 +320,8 @@ async function getVerifiedAgents() {
           verified.push({
             id: key0,
             agentId: key0,
-            name: `Curate item ${row.itemID.slice(0, 10)}…`,
+            name: fallbackName,
             network: network || "sepolia",
-            curateItemUrl: `https://curate.kleros.io/tcr/11155111/${registryAddress}/${row.itemID}`,
-            ...{ name: fallbackName, curateItemUrl: undefined },
             stake: row.stake || "0",
             verifiedAt: Number(row.includedAt) || 0,
           });

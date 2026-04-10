@@ -12,6 +12,8 @@ import {
   type CurateMode,
 } from "@/lib/curate-config";
 
+const SUBGRAPH_LOOKUP_TIMEOUT_MS = 6000;
+
 type CurateProp = {
   label?: string | null;
   value?: string | null;
@@ -144,7 +146,12 @@ async function resolveAgentForCurateEntry(
 ): Promise<{ id: string; agentId: string; name: string; network: AgentSubgraphNetwork } | null> {
   if (hintedNetwork) {
     try {
-      const agent = await getAgentByAgentId(key0, hintedNetwork);
+      const agent = await Promise.race([
+        getAgentByAgentId(key0, hintedNetwork, 1, true),
+        new Promise<null>((resolve) => {
+          setTimeout(() => resolve(null), SUBGRAPH_LOOKUP_TIMEOUT_MS);
+        }),
+      ]);
       if (agent) {
         return {
           id: agent.id,
@@ -154,14 +161,20 @@ async function resolveAgentForCurateEntry(
         };
       }
     } catch {
-      // keep trying other networks
+      // fall back to unresolved Curate metadata below
     }
+
+    return null;
   }
 
   for (const network of AGENT_SUBGRAPH_NETWORKS) {
-    if (network === hintedNetwork) continue;
     try {
-      const agent = await getAgentByAgentId(key0, network);
+      const agent = await Promise.race([
+        getAgentByAgentId(key0, network, 1, true),
+        new Promise<null>((resolve) => {
+          setTimeout(() => resolve(null), SUBGRAPH_LOOKUP_TIMEOUT_MS);
+        }),
+      ]);
       if (!agent) continue;
       return {
         id: agent.id,

@@ -11,6 +11,7 @@ import {
   loadCurateRegistrationFile,
   parseCaip10Owner,
 } from "@/lib/curate-agent-fallback";
+import { refreshAgentFeedbackFromChain } from "@/lib/reputation-feedback.server";
 import type { AgentWithDetails, AgentRegistrationFile } from "@/types/agent";
 
 type CurateSearchItem = {
@@ -190,7 +191,8 @@ function matchesFallbackQuery(agent: AgentWithDetails, query: string) {
 
 export async function getCurateFallbackAgentByAgentId(
   agentIdLike: string,
-  network?: AgentSubgraphNetwork | null
+  network?: AgentSubgraphNetwork | null,
+  feedbackFirst = 10
 ) {
   try {
     if (getCurateMode() !== "pgtcr") return null;
@@ -216,13 +218,19 @@ export async function getCurateFallbackAgentByAgentId(
       includedAt: item.includedAt,
       registrationFile,
     });
+    const hydratedAgent = await refreshAgentFeedbackFromChain(
+      inferredNetwork,
+      fallbackAgent,
+      feedbackFirst
+    );
 
     return {
-      agent: fallbackAgent,
+      agent: hydratedAgent,
       itemID: lookup.itemID,
       network: inferredNetwork,
     };
-  } catch {
+  } catch (error) {
+    console.error("[Curate fallback agent] Failed for", agentIdLike, network || "auto", error);
     return null;
   }
 }

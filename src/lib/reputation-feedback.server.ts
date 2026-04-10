@@ -1,7 +1,7 @@
 import "server-only";
 
 import { GraphQLClient, gql } from "graphql-request";
-import { createPublicClient, http, parseAbiItem, type Chain } from "viem";
+import { createPublicClient, http, parseAbi, parseAbiItem, type Chain } from "viem";
 import { base, bsc, mainnet, polygon, sepolia } from "viem/chains";
 import type { AgentWithDetails, Feedback } from "@/types/agent";
 import { getAgentSubgraphUrl } from "@/lib/agent-subgraphs.server";
@@ -22,7 +22,34 @@ type FeedbackOverlay = {
   endpoints: Map<string, string>;
 };
 
+type FullFeedbackSnapshot = {
+  feedback: Feedback[];
+  totalFeedback: number;
+  newestActivityAt: number | null;
+  txHashes: Map<string, string>;
+  feedbackUris: Map<string, string>;
+  endpoints: Map<string, string>;
+};
+
 type FeedbackFilePayload = NonNullable<Feedback["feedbackFile"]>;
+
+type NewFeedbackLogArgs = {
+  agentId?: bigint;
+  clientAddress?: `0x${string}`;
+  feedbackIndex?: bigint;
+  value?: bigint;
+  valueDecimals?: number;
+  tag1?: string;
+  tag2?: string;
+  endpoint?: string;
+  feedbackURI?: string;
+};
+
+type FeedbackRevokedLogArgs = {
+  agentId?: bigint;
+  clientAddress?: `0x${string}`;
+  feedbackIndex?: bigint;
+};
 
 type ReputationFallbackConfig = {
   chain: Chain;
@@ -36,9 +63,13 @@ type ReputationFallbackConfig = {
 const REPUTATION_FEEDBACK_OVERFETCH = 40;
 const HEAD_CACHE_TTL_MS = 15_000;
 const SUBGRAPH_META_CACHE_TTL_MS = 60_000;
-const LOG_CHUNK_SIZE = 50_000n;
+const LOG_CHUNK_SIZE = 10_000n;
+const MIN_LOG_CHUNK_SIZE = 1_000n;
+const TX_BACKFILL_MAX_BLOCKS = 200_000n;
 const FEEDBACK_FETCH_TIMEOUT_MS = 6_000;
 const IPFS_GATEWAY_BASE_URL = "https://cdn.kleros.link/ipfs/";
+const FULL_FEEDBACK_CACHE_TTL_MS = 60_000;
+const FULL_FEEDBACK_LOOKBACK_BLOCKS = 20_000n;
 
 const GET_SUBGRAPH_META = gql`
   query GetAgentSubgraphMeta {
@@ -57,6 +88,10 @@ const LOG_NEW_FEEDBACK = parseAbiItem(
 const LOG_FEEDBACK_REVOKED = parseAbiItem(
   "event FeedbackRevoked(uint256 indexed agentId, address indexed clientAddress, uint64 indexed feedbackIndex)"
 );
+
+const REPUTATION_READ_ABI = parseAbi([
+  "function readAllFeedback(uint256 agentId, address[] clientAddresses, string tag1, string tag2, bool includeRevoked) view returns (address[] clients, uint64[] feedbackIndexes, int128[] values, uint8[] valueDecimals, string[] tag1s, string[] tag2s, bool[] revokedStatuses)",
+]);
 
 const REPUTATION_FALLBACK_CONFIGS: Record<AgentSubgraphNetwork, ReputationFallbackConfig> = {
   sepolia: {
@@ -101,10 +136,11 @@ const REPUTATION_FALLBACK_CONFIGS: Record<AgentSubgraphNetwork, ReputationFallba
   },
 };
 
-const publicClientsByNetwork = new Map<AgentSubgraphNetwork, ReturnType<typeof createPublicClient>>();
+const publicClientsByRpcUrl = new Map<string, ReturnType<typeof createPublicClient>>();
 const subgraphClientsByNetwork = new Map<AgentSubgraphNetwork, GraphQLClient>();
 const headCacheByNetwork = new Map<AgentSubgraphNetwork, CachedBigInt>();
 const indexedBlockCacheByNetwork = new Map<AgentSubgraphNetwork, CachedBigInt>();
+const fullFeedbackCacheByKey = new Map<string, { expiresAt: number; value: FullFeedbackSnapshot | null }>();
 
 function getCache(map: Map<AgentSubgraphNetwork, CachedBigInt>, network: AgentSubgraphNetwork) {
   const existing = map.get(network);
@@ -133,32 +169,46 @@ function isReputationFallbackEnabled(network: AgentSubgraphNetwork): boolean {
   return true;
 }
 
-function getRpcUrl(network: AgentSubgraphNetwork): string | null {
+function getRpcUrls(network: AgentSubgraphNetwork): string[] {
   const config = REPUTATION_FALLBACK_CONFIGS[network];
+  const urls: string[] = [];
+
   for (const envKey of config.rpcEnvKeys) {
     const value = process.env[envKey]?.trim();
-    if (value) return value;
+    if (value && !urls.includes(value)) urls.push(value);
   }
 
-  return config.chain.rpcUrls.default.http[0] || null;
+  for (const value of config.chain.rpcUrls.default.http) {
+    if (value && !urls.includes(value)) urls.push(value);
+  }
+
+  return urls;
 }
 
 function getPublicClient(network: AgentSubgraphNetwork) {
+  const clients = getPublicClients(network);
+  return clients?.[0] || null;
+}
+
+function getPublicClients(network: AgentSubgraphNetwork) {
   if (!isReputationFallbackEnabled(network)) return null;
 
-  const existing = publicClientsByNetwork.get(network);
-  if (existing) return existing;
-
-  const rpcUrl = getRpcUrl(network);
-  if (!rpcUrl) return null;
-
   const config = REPUTATION_FALLBACK_CONFIGS[network];
-  const client = createPublicClient({
-    chain: config.chain,
-    transport: http(rpcUrl),
-  });
-  publicClientsByNetwork.set(network, client);
-  return client;
+  const clients = getRpcUrls(network)
+    .map((rpcUrl) => {
+      const existing = publicClientsByRpcUrl.get(rpcUrl);
+      if (existing) return existing;
+
+      const client = createPublicClient({
+        chain: config.chain,
+        transport: http(rpcUrl),
+      });
+      publicClientsByRpcUrl.set(rpcUrl, client);
+      return client;
+    })
+    .filter(Boolean);
+
+  return clients.length > 0 ? clients : null;
 }
 
 function getSubgraphClient(network: AgentSubgraphNetwork) {
@@ -170,6 +220,59 @@ function getSubgraphClient(network: AgentSubgraphNetwork) {
   return client;
 }
 
+function isLogRangeLimitError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("eth_getlogs is limited") ||
+    normalized.includes("maximum allowed number of requested blocks") ||
+    normalized.includes("request exceeds defined limit") ||
+    normalized.includes("log response size exceeded") ||
+    normalized.includes("413")
+  );
+}
+
+type GetLogsRequest = Omit<
+  Parameters<ReturnType<typeof createPublicClient>["getLogs"]>[0],
+  "fromBlock" | "toBlock"
+>;
+
+async function getLogsWithAdaptiveChunking(
+  publicClient: ReturnType<typeof createPublicClient>,
+  request: GetLogsRequest,
+  fromBlock: bigint,
+  toBlock: bigint
+) {
+  const logs: Awaited<ReturnType<typeof publicClient.getLogs>> = [];
+
+  for (let cursor = fromBlock; cursor <= toBlock;) {
+    let chunkSize = LOG_CHUNK_SIZE;
+    let batch: Awaited<ReturnType<typeof publicClient.getLogs>> | null = null;
+
+    while (batch === null) {
+      const batchToBlock = cursor + chunkSize > toBlock ? toBlock : cursor + chunkSize;
+      try {
+        batch = await (publicClient.getLogs as (...args: unknown[]) => Promise<typeof logs> )({
+          ...(request as object),
+          fromBlock: cursor,
+          toBlock: batchToBlock,
+        });
+        cursor = batchToBlock + 1n;
+      } catch (error) {
+        if (!isLogRangeLimitError(error) || chunkSize <= MIN_LOG_CHUNK_SIZE) {
+          throw error;
+        }
+        chunkSize /= 2n;
+        if (chunkSize < MIN_LOG_CHUNK_SIZE) chunkSize = MIN_LOG_CHUNK_SIZE;
+      }
+    }
+
+    logs.push(...batch);
+  }
+
+  return logs;
+}
+
 async function getHeadBlock(network: AgentSubgraphNetwork): Promise<bigint | null> {
   const cache = getCache(headCacheByNetwork, network);
   const now = Date.now();
@@ -177,14 +280,21 @@ async function getHeadBlock(network: AgentSubgraphNetwork): Promise<bigint | nul
     return cache.value;
   }
 
-  const client = getPublicClient(network);
-  if (!client) return null;
-  const publicClient = client;
+  const clients = getPublicClients(network);
+  if (!clients?.length) return null;
 
-  const value = await publicClient.getBlockNumber();
-  cache.value = value;
-  cache.expiresAt = now + HEAD_CACHE_TTL_MS;
-  return value;
+  for (const publicClient of clients) {
+    try {
+      const value = await publicClient.getBlockNumber();
+      cache.value = value;
+      cache.expiresAt = now + HEAD_CACHE_TTL_MS;
+      return value;
+    } catch {
+      // Try the next configured RPC if this one is temporarily unavailable or rate limited.
+    }
+  }
+
+  return null;
 }
 
 async function getIndexedBlock(network: AgentSubgraphNetwork): Promise<bigint | null> {
@@ -246,6 +356,11 @@ function buildFeedbackId(
 ): string {
   const chainId = REPUTATION_FALLBACK_CONFIGS[network].chainId;
   return `${chainId.toString()}:${agentId.toString()}:${clientAddress.toLowerCase()}:${feedbackIndex.toString()}`;
+}
+
+function shouldAttemptFullFeedbackSnapshot(network: AgentSubgraphNetwork, agent: AgentWithDetails): boolean {
+  if (network !== "sepolia") return false;
+  return agent.feedback.length === 0 || (Number.parseInt(agent.totalFeedback, 10) || 0) === 0;
 }
 
 function compareFeedbackDesc(left: Feedback, right: Feedback): number {
@@ -499,23 +614,30 @@ async function fetchFeedbackOverlay(
     for (let cursor = fromBlock; cursor <= headBlock; cursor += LOG_CHUNK_SIZE + 1n) {
       const toBlock = cursor + LOG_CHUNK_SIZE > headBlock ? headBlock : cursor + LOG_CHUNK_SIZE;
       const [newFeedbackLogs, revokedLogs] = await Promise.all([
-        publicClient.getLogs({
-          address: config.reputationRegistryAddress,
-          event: LOG_NEW_FEEDBACK,
-          args: { agentId: numericAgentId },
-          fromBlock: cursor,
-          toBlock,
-        }),
-        publicClient.getLogs({
-          address: config.reputationRegistryAddress,
-          event: LOG_FEEDBACK_REVOKED,
-          args: { agentId: numericAgentId },
-          fromBlock: cursor,
-          toBlock,
-        }),
+        getLogsWithAdaptiveChunking(
+          publicClient,
+          {
+            address: config.reputationRegistryAddress,
+            event: LOG_NEW_FEEDBACK,
+            args: { agentId: numericAgentId },
+          },
+          cursor,
+          toBlock
+        ),
+        getLogsWithAdaptiveChunking(
+          publicClient,
+          {
+            address: config.reputationRegistryAddress,
+            event: LOG_FEEDBACK_REVOKED,
+            args: { agentId: numericAgentId },
+          },
+          cursor,
+          toBlock
+        ),
       ]);
 
       for (const log of newFeedbackLogs) {
+        const args = (log as typeof log & { args: NewFeedbackLogArgs }).args;
         const {
           agentId: eventAgentId,
           clientAddress,
@@ -526,7 +648,7 @@ async function fetchFeedbackOverlay(
           tag2,
           endpoint,
           feedbackURI,
-        } = log.args;
+        } = args;
         if (
           eventAgentId === undefined ||
           clientAddress === undefined ||
@@ -542,6 +664,7 @@ async function fetchFeedbackOverlay(
         if (log.transactionHash) txHashes.set(feedbackId, log.transactionHash);
         if (endpoint) endpoints.set(feedbackId, endpoint);
         if (feedbackURI) feedbackUris.set(feedbackId, feedbackURI);
+        if (log.blockNumber === null) continue;
 
         const createdAt = await getBlockTimestamp(log.blockNumber);
         if (createdAt > newestActivityAt) newestActivityAt = createdAt;
@@ -561,7 +684,9 @@ async function fetchFeedbackOverlay(
       }
 
       for (const log of revokedLogs) {
-        const { agentId: eventAgentId, clientAddress, feedbackIndex } = log.args;
+        const { agentId: eventAgentId, clientAddress, feedbackIndex } = (log as typeof log & {
+          args: FeedbackRevokedLogArgs;
+        }).args;
         if (eventAgentId === undefined || clientAddress === undefined || feedbackIndex === undefined) {
           continue;
         }
@@ -569,6 +694,7 @@ async function fetchFeedbackOverlay(
         const feedbackId = buildFeedbackId(network, eventAgentId, clientAddress, feedbackIndex);
         revokedIds.add(feedbackId);
         activeWindowFeedback.delete(feedbackId);
+        if (log.blockNumber === null) continue;
 
         const revokedAt = await getBlockTimestamp(log.blockNumber);
         if (revokedAt > newestActivityAt) newestActivityAt = revokedAt;
@@ -578,42 +704,55 @@ async function fetchFeedbackOverlay(
 
   const unresolvedTxIds = new Set(Array.from(targetFeedbackIds).filter((id) => !txHashes.has(id)));
   let searchToBlock = indexedBlock !== null && indexedBlock < headBlock ? indexedBlock : headBlock;
+  const minBackfillBlock =
+    searchToBlock > config.reputationStartBlock + TX_BACKFILL_MAX_BLOCKS
+      ? searchToBlock - TX_BACKFILL_MAX_BLOCKS
+      : config.reputationStartBlock;
 
-  while (unresolvedTxIds.size > 0 && searchToBlock >= config.reputationStartBlock) {
-    const candidateStart = searchToBlock > LOG_CHUNK_SIZE ? searchToBlock - LOG_CHUNK_SIZE : 0n;
-    const fromBlock = candidateStart < config.reputationStartBlock ? config.reputationStartBlock : candidateStart;
+  try {
+    while (unresolvedTxIds.size > 0 && searchToBlock >= minBackfillBlock) {
+      const candidateStart = searchToBlock > LOG_CHUNK_SIZE ? searchToBlock - LOG_CHUNK_SIZE : 0n;
+      const fromBlock = candidateStart < minBackfillBlock ? minBackfillBlock : candidateStart;
 
-    const logs = await publicClient.getLogs({
-      address: config.reputationRegistryAddress,
-      event: LOG_NEW_FEEDBACK,
-      args: { agentId: numericAgentId },
-      fromBlock,
-      toBlock: searchToBlock,
-    });
+      const logs = await getLogsWithAdaptiveChunking(
+        publicClient,
+        {
+          address: config.reputationRegistryAddress,
+          event: LOG_NEW_FEEDBACK,
+          args: { agentId: numericAgentId },
+        },
+        fromBlock,
+        searchToBlock
+      );
 
-    for (let index = logs.length - 1; index >= 0; index -= 1) {
-      const log = logs[index];
-      const { agentId: eventAgentId, clientAddress, feedbackIndex, endpoint, feedbackURI } = log.args;
-      if (
-        eventAgentId === undefined ||
-        clientAddress === undefined ||
-        feedbackIndex === undefined ||
-        !log.transactionHash
-      ) {
-        continue;
+      for (let index = logs.length - 1; index >= 0; index -= 1) {
+        const log = logs[index];
+        const { agentId: eventAgentId, clientAddress, feedbackIndex, endpoint, feedbackURI } = (log as typeof log & {
+          args: NewFeedbackLogArgs;
+        }).args;
+        if (
+          eventAgentId === undefined ||
+          clientAddress === undefined ||
+          feedbackIndex === undefined ||
+          !log.transactionHash
+        ) {
+          continue;
+        }
+
+        const feedbackId = buildFeedbackId(network, eventAgentId, clientAddress, feedbackIndex);
+        if (!unresolvedTxIds.has(feedbackId)) continue;
+        txHashes.set(feedbackId, log.transactionHash);
+        if (endpoint) endpoints.set(feedbackId, endpoint);
+        if (feedbackURI) feedbackUris.set(feedbackId, feedbackURI);
+        unresolvedTxIds.delete(feedbackId);
+        if (unresolvedTxIds.size === 0) break;
       }
 
-      const feedbackId = buildFeedbackId(network, eventAgentId, clientAddress, feedbackIndex);
-      if (!unresolvedTxIds.has(feedbackId)) continue;
-      txHashes.set(feedbackId, log.transactionHash);
-      if (endpoint) endpoints.set(feedbackId, endpoint);
-      if (feedbackURI) feedbackUris.set(feedbackId, feedbackURI);
-      unresolvedTxIds.delete(feedbackId);
-      if (unresolvedTxIds.size === 0) break;
+      if (fromBlock === minBackfillBlock) break;
+      searchToBlock = fromBlock - 1n;
     }
-
-    if (fromBlock === config.reputationStartBlock) break;
-    searchToBlock = fromBlock - 1n;
+  } catch {
+    // Older transaction hashes are optional metadata; keep the feedback payload even if backfill fails.
   }
 
   let totalDelta = 0;
@@ -635,6 +774,257 @@ async function fetchFeedbackOverlay(
   };
 }
 
+async function fetchFullFeedbackSnapshot(
+  network: AgentSubgraphNetwork,
+  agent: AgentWithDetails
+): Promise<FullFeedbackSnapshot | null> {
+  const cacheKey = `${network}:${agent.agentId}`;
+  const cached = fullFeedbackCacheByKey.get(cacheKey);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) {
+    return cached.value;
+  }
+
+  if (!isReputationFallbackEnabled(network) || network !== "sepolia") {
+    fullFeedbackCacheByKey.set(cacheKey, { expiresAt: now + FULL_FEEDBACK_CACHE_TTL_MS, value: null });
+    return null;
+  }
+
+  const numericAgentId = parseNumericAgentId(agent.agentId);
+  if (numericAgentId === null) {
+    fullFeedbackCacheByKey.set(cacheKey, { expiresAt: now + FULL_FEEDBACK_CACHE_TTL_MS, value: null });
+    return null;
+  }
+
+  const clients = getPublicClients(network);
+  if (!clients?.length) {
+    fullFeedbackCacheByKey.set(cacheKey, { expiresAt: now + FULL_FEEDBACK_CACHE_TTL_MS, value: null });
+    return null;
+  }
+
+  const config = REPUTATION_FALLBACK_CONFIGS[network];
+  const createdAtTarget = BigInt(Math.max(0, Number.parseInt(agent.createdAt || "0", 10) || 0));
+  let lastSnapshotError: unknown = null;
+
+  for (const publicClient of clients) {
+    try {
+      const readAllFeedbackResult = await publicClient.readContract({
+        address: config.reputationRegistryAddress,
+        abi: REPUTATION_READ_ABI,
+        functionName: "readAllFeedback",
+        args: [numericAgentId, [], "", "", false],
+      });
+
+      const [clientsList, feedbackIndexes, values, valueDecimals, tag1s, tag2s] = readAllFeedbackResult;
+      if (clientsList.length > 0) {
+        const fallbackTimestamp = String(
+          Math.max(
+            Number.parseInt(agent.lastActivity, 10) || 0,
+            Number.parseInt(agent.createdAt, 10) || 0
+          )
+        );
+        const snapshot: FullFeedbackSnapshot = {
+          feedback: clientsList.map((clientAddress, index) => {
+            const feedbackIndex = BigInt(feedbackIndexes[index] ?? 0);
+            const rawValue = BigInt(values[index] ?? 0);
+            const decimals = Number(valueDecimals[index] ?? 0);
+            return {
+              id: buildFeedbackId(network, numericAgentId, clientAddress, feedbackIndex),
+              value: formatFeedbackValue(rawValue, decimals),
+              tag1: tag1s[index] || null,
+              tag2: tag2s[index] || null,
+              endpoint: null,
+              clientAddress: clientAddress.toLowerCase(),
+              createdAt: fallbackTimestamp,
+              feedbackURI: null,
+              txHash: null,
+              feedbackFile: null,
+            } satisfies Feedback;
+          }),
+          totalFeedback: clientsList.length,
+          newestActivityAt: Number.parseInt(fallbackTimestamp, 10) || null,
+          txHashes: new Map<string, string>(),
+          feedbackUris: new Map<string, string>(),
+          endpoints: new Map<string, string>(),
+        };
+        fullFeedbackCacheByKey.set(cacheKey, {
+          expiresAt: now + FULL_FEEDBACK_CACHE_TTL_MS,
+          value: snapshot,
+        });
+        return snapshot;
+      }
+
+      const headBlock = await publicClient.getBlockNumber();
+      const blockTimestampCache = new Map<bigint, number>();
+      async function getBlockTimestamp(blockNumber: bigint): Promise<number> {
+        const existing = blockTimestampCache.get(blockNumber);
+        if (existing !== undefined) return existing;
+        const block = await publicClient.getBlock({ blockNumber });
+        const value = Number(block.timestamp);
+        blockTimestampCache.set(blockNumber, value);
+        return value;
+      }
+
+      let snapshotStartBlock = config.reputationStartBlock;
+      if (createdAtTarget > 0n && headBlock > config.reputationStartBlock) {
+        const startTimestamp = BigInt(await getBlockTimestamp(config.reputationStartBlock));
+        const headTimestamp = BigInt(await getBlockTimestamp(headBlock));
+        if (createdAtTarget > startTimestamp && createdAtTarget < headTimestamp) {
+          let low = config.reputationStartBlock;
+          let high = headBlock;
+
+          while (low < high) {
+            const mid = low + (high - low) / 2n;
+            const midTimestamp = BigInt(await getBlockTimestamp(mid));
+            if (midTimestamp < createdAtTarget) low = mid + 1n;
+            else high = mid;
+          }
+
+          snapshotStartBlock =
+            low > FULL_FEEDBACK_LOOKBACK_BLOCKS
+              ? low - FULL_FEEDBACK_LOOKBACK_BLOCKS
+              : config.reputationStartBlock;
+          if (snapshotStartBlock < config.reputationStartBlock) {
+            snapshotStartBlock = config.reputationStartBlock;
+          }
+        }
+      }
+
+      const newFeedbackLogs = await getLogsWithAdaptiveChunking(
+        publicClient,
+        {
+          address: config.reputationRegistryAddress,
+          event: LOG_NEW_FEEDBACK,
+          args: { agentId: numericAgentId },
+        },
+        snapshotStartBlock,
+        headBlock
+      );
+      const revokedLogs =
+        newFeedbackLogs.length > 0
+          ? await getLogsWithAdaptiveChunking(
+              publicClient,
+              {
+                address: config.reputationRegistryAddress,
+                event: LOG_FEEDBACK_REVOKED,
+                args: { agentId: numericAgentId },
+              },
+              snapshotStartBlock,
+              headBlock
+            )
+          : [];
+
+      const events = [
+        ...newFeedbackLogs.map((log) => ({ kind: "new" as const, log })),
+        ...revokedLogs.map((log) => ({ kind: "revoked" as const, log })),
+      ].sort((left, right) => {
+        const leftBlock = left.log.blockNumber ?? 0n;
+        const rightBlock = right.log.blockNumber ?? 0n;
+        if (leftBlock !== rightBlock) return leftBlock < rightBlock ? -1 : 1;
+        const leftIndex = left.log.logIndex ?? 0;
+        const rightIndex = right.log.logIndex ?? 0;
+        return leftIndex - rightIndex;
+      });
+
+      const activeFeedback = new Map<string, Feedback>();
+      const txHashes = new Map<string, string>();
+      const feedbackUris = new Map<string, string>();
+      const endpoints = new Map<string, string>();
+      let newestActivityAt = 0;
+
+      for (const event of events) {
+        if (event.kind === "new") {
+          const log = event.log;
+          const {
+            agentId: eventAgentId,
+            clientAddress,
+            feedbackIndex,
+            value,
+            valueDecimals,
+            tag1,
+            tag2,
+            endpoint,
+            feedbackURI,
+          } = (log as typeof log & { args: NewFeedbackLogArgs }).args;
+
+          if (
+            eventAgentId === undefined ||
+            clientAddress === undefined ||
+            feedbackIndex === undefined ||
+            value === undefined ||
+            valueDecimals === undefined ||
+            log.blockNumber === null
+          ) {
+            continue;
+          }
+
+          const feedbackId = buildFeedbackId(network, eventAgentId, clientAddress, feedbackIndex);
+          const createdAt = await getBlockTimestamp(log.blockNumber);
+          if (createdAt > newestActivityAt) newestActivityAt = createdAt;
+          if (log.transactionHash) txHashes.set(feedbackId, log.transactionHash);
+          if (endpoint) endpoints.set(feedbackId, endpoint);
+          if (feedbackURI) feedbackUris.set(feedbackId, feedbackURI);
+
+          activeFeedback.set(feedbackId, {
+            id: feedbackId,
+            value: formatFeedbackValue(value, Number(valueDecimals)),
+            tag1: tag1 || null,
+            tag2: tag2 || null,
+            endpoint: endpoint || null,
+            clientAddress: clientAddress.toLowerCase(),
+            createdAt: createdAt.toString(),
+            feedbackURI: feedbackURI || null,
+            txHash: log.transactionHash || null,
+            feedbackFile: null,
+          });
+          continue;
+        }
+
+        const log = event.log;
+        const { agentId: eventAgentId, clientAddress, feedbackIndex } = (log as typeof log & {
+          args: FeedbackRevokedLogArgs;
+        }).args;
+        if (
+          eventAgentId === undefined ||
+          clientAddress === undefined ||
+          feedbackIndex === undefined ||
+          log.blockNumber === null
+        ) {
+          continue;
+        }
+
+        const feedbackId = buildFeedbackId(network, eventAgentId, clientAddress, feedbackIndex);
+        activeFeedback.delete(feedbackId);
+        const revokedAt = await getBlockTimestamp(log.blockNumber);
+        if (revokedAt > newestActivityAt) newestActivityAt = revokedAt;
+      }
+
+      const snapshot: FullFeedbackSnapshot = {
+        feedback: Array.from(activeFeedback.values()).sort(compareFeedbackDesc),
+        totalFeedback: activeFeedback.size,
+        newestActivityAt: newestActivityAt > 0 ? newestActivityAt : null,
+        txHashes,
+        feedbackUris,
+        endpoints,
+      };
+      fullFeedbackCacheByKey.set(cacheKey, {
+        expiresAt: now + FULL_FEEDBACK_CACHE_TTL_MS,
+        value: snapshot,
+      });
+      return snapshot;
+    } catch (error) {
+      lastSnapshotError = error;
+      // Move to the next configured RPC when a provider is rate limited or constrains log windows.
+    }
+  }
+
+  if (lastSnapshotError) {
+    console.error("[Reputation full snapshot] Failed for", network, agent.agentId, lastSnapshotError);
+  }
+  fullFeedbackCacheByKey.set(cacheKey, { expiresAt: now + FULL_FEEDBACK_CACHE_TTL_MS, value: null });
+  return null;
+}
+
 export function getReputationFeedbackRequestSize(
   network: AgentSubgraphNetwork,
   feedbackFirst: number
@@ -651,11 +1041,38 @@ export async function refreshAgentFeedbackFromChain(
 ): Promise<AgentWithDetails> {
   let mergedAgent: AgentWithDetails = trimFeedback(agent, feedbackFirst);
   let overlayUris = new Map<string, string>();
+  const wantsFullSnapshot = shouldAttemptFullFeedbackSnapshot(network, agent);
+
+  async function buildFromFullSnapshot() {
+    const snapshot = await fetchFullFeedbackSnapshot(network, agent);
+    if (!snapshot) return null;
+    const lastActivityBase = Number.parseInt(agent.lastActivity, 10) || 0;
+    overlayUris = snapshot.feedbackUris;
+    return {
+      ...agent,
+      totalFeedback: String(snapshot.totalFeedback),
+      lastActivity: String(Math.max(lastActivityBase, snapshot.newestActivityAt || 0) || lastActivityBase),
+      feedback: snapshot.feedback.map((item) => ({
+        ...item,
+        endpoint: snapshot.endpoints.get(item.id) || item.endpoint || null,
+        feedbackURI: snapshot.feedbackUris.get(item.id) || item.feedbackURI || null,
+        txHash: snapshot.txHashes.get(item.id) || item.txHash || null,
+      })),
+    } satisfies AgentWithDetails;
+  }
 
   try {
     const targetFeedbackIds = new Set(agent.feedback.map((item) => item.id));
     const overlay = await fetchFeedbackOverlay(network, agent.agentId, targetFeedbackIds);
-    if (!overlay) return finalizeAgentFeedback(mergedAgent, feedbackFirst, overlayUris);
+    if (!overlay) {
+      if (wantsFullSnapshot) {
+        const fullSnapshotAgent = await buildFromFullSnapshot();
+        if (fullSnapshotAgent) {
+          return finalizeAgentFeedback(fullSnapshotAgent, feedbackFirst, overlayUris);
+        }
+      }
+      return finalizeAgentFeedback(mergedAgent, feedbackFirst, overlayUris);
+    }
 
     const merged = new Map<string, Feedback>();
     for (const item of agent.feedback) {
@@ -709,6 +1126,16 @@ export async function refreshAgentFeedbackFromChain(
       feedback: mergedFeedback,
     };
   } catch {
+    if (wantsFullSnapshot) {
+      try {
+        const fullSnapshotAgent = await buildFromFullSnapshot();
+        if (fullSnapshotAgent) {
+          return finalizeAgentFeedback(fullSnapshotAgent, feedbackFirst, overlayUris);
+        }
+      } catch {
+        // fall back to the original agent payload below
+      }
+    }
     mergedAgent = trimFeedback(agent, feedbackFirst);
   }
 

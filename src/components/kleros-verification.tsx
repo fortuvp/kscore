@@ -40,7 +40,7 @@ type PgtcrItemApiResponse =
     | { success: false; error: string };
 
 type PgtcrRegistryApiResponse =
-    | { success: true; registry: { id: string; token: string } }
+    | { success: true; registry: { id: string; token: string; tokenSymbol?: string | null; tokenDecimals?: number | null } }
     | { success: false; error: string };
 
 export function KlerosCurateVerification(props: {
@@ -56,6 +56,10 @@ export function KlerosCurateVerification(props: {
     const [pgtcrItem, setPgtcrItem] = useState<PgtcrItemApiResponse | null>(null);
     const [pgtcrToken, setPgtcrToken] = useState<`0x${string}` | null>(null);
     const [pgtcrRegistryAddress, setPgtcrRegistryAddress] = useState<`0x${string}` | null>(null);
+    const [pgtcrTokenMeta, setPgtcrTokenMeta] = useState<{ symbol: string | null; decimals: number | null }>({
+        symbol: null,
+        decimals: null,
+    });
     const [withdrawing, setWithdrawing] = useState(false);
     const [withdrawConfirmOpen, setWithdrawConfirmOpen] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -87,18 +91,28 @@ export function KlerosCurateVerification(props: {
                             setPgtcrItem(itemJson);
                             setPgtcrToken(regJson.success ? (regJson.registry.token as `0x${string}`) : null);
                             setPgtcrRegistryAddress(regJson.success ? (regJson.registry.id as `0x${string}`) : null);
+                            setPgtcrTokenMeta(
+                                regJson.success
+                                    ? {
+                                          symbol: regJson.registry.tokenSymbol ?? null,
+                                          decimals: regJson.registry.tokenDecimals ?? null,
+                                      }
+                                    : { symbol: null, decimals: null }
+                            );
                         }
                     } catch {
                         if (!cancelled) {
                             setPgtcrItem(null);
                             setPgtcrToken(null);
                             setPgtcrRegistryAddress(null);
+                            setPgtcrTokenMeta({ symbol: null, decimals: null });
                         }
                     }
                 } else {
                     setPgtcrItem(null);
                     setPgtcrToken(null);
                     setPgtcrRegistryAddress(null);
+                    setPgtcrTokenMeta({ symbol: null, decimals: null });
                 }
             } catch (e) {
                 if (!cancelled) setData({ success: false, error: e instanceof Error ? e.message : "Unknown error" });
@@ -130,6 +144,9 @@ export function KlerosCurateVerification(props: {
         functionName: "symbol",
         query: { enabled: Boolean(pgtcrToken) },
     }).data as string | undefined;
+
+    const resolvedTokenDecimals = tokenDecimals ?? pgtcrTokenMeta.decimals ?? 18;
+    const resolvedTokenSymbol = tokenSymbol || pgtcrTokenMeta.symbol || "";
 
 
     const submitter = pgtcrItem && pgtcrItem.success && pgtcrItem.item?.submitter ? pgtcrItem.item.submitter : null;
@@ -252,7 +269,7 @@ export function KlerosCurateVerification(props: {
                     {stake !== null ? (
                         <Badge variant="outline" className={`font-mono ${isWithdrawn ? "line-through opacity-70" : ""}`}>
                             Collateralized:{" "}
-                            {tokenDecimals !== undefined ? formatUnits(stake, tokenDecimals) : stake.toString()} {tokenSymbol || ""}
+                            {formatUnits(stake, resolvedTokenDecimals)} {resolvedTokenSymbol}
                         </Badge>
                     ) : null}
 

@@ -38,6 +38,8 @@ type RegistryApiResponse =
       registry: {
         id: string;
         token: string;
+        tokenSymbol?: string | null;
+        tokenDecimals?: number | null;
         submissionMinDeposit: string;
         arbitrator: { id: string };
         arbitrationSettings: Array<{ metaEvidenceURI: string; arbitratorExtraData: string; metadata?: { policyURI?: string | null } | null }>;
@@ -120,6 +122,8 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
     functionName: "symbol",
     query: { enabled: Boolean(tokenAddress) },
   }).data as string | undefined;
+  const resolvedTokenDecimals = tokenDecimals ?? (registry && registry.success ? registry.registry.tokenDecimals ?? undefined : undefined) ?? 18;
+  const resolvedTokenSymbol = tokenSymbol || (registry && registry.success ? registry.registry.tokenSymbol || undefined : undefined) || "TOKEN";
 
   const allowance = useReadContract({
     address: tokenAddress,
@@ -205,12 +209,11 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
   const deposit = React.useMemo(() => {
     try {
       if (!depositInput) return submissionMinDeposit;
-      if (!tokenDecimals && tokenDecimals !== 0) return submissionMinDeposit;
-      return parseUnits(depositInput as `${number}`, tokenDecimals);
+      return parseUnits(depositInput as `${number}`, resolvedTokenDecimals);
     } catch {
       return submissionMinDeposit;
     }
-  }, [depositInput, submissionMinDeposit, tokenDecimals]);
+  }, [depositInput, resolvedTokenDecimals, submissionMinDeposit]);
 
   const needsApproval = Boolean(allowance !== undefined && allowance < deposit);
   const hasEnoughTokenBalance = tokenBalance === undefined || tokenBalance >= deposit;
@@ -218,7 +221,7 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
   const balanceIssues: string[] = [];
 
   if (isConnected && onSepolia && !hasEnoughTokenBalance) {
-    balanceIssues.push(`Insufficient balance. Need ${tokenDecimals !== undefined ? formatUnits(deposit, tokenDecimals) : deposit.toString()} ${tokenSymbol || "TOKEN"} for the deposit.`);
+    balanceIssues.push(`Insufficient balance. Need ${formatUnits(deposit, resolvedTokenDecimals)} ${resolvedTokenSymbol} for the deposit.`);
   }
   if (isConnected && onSepolia && !hasEnoughNativeBalance) {
     balanceIssues.push(`Insufficient balance. Need ${formatEther(arbitrationCost || 0n)} ETH for arbitration.`);
@@ -393,13 +396,9 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
         </div>
         <div>
           Submission min deposit:{" "}
-          {tokenDecimals !== undefined ? (
-            <span className="font-mono">
-              {formatUnits(submissionMinDeposit, tokenDecimals)} {tokenSymbol || "TOKEN"}
-            </span>
-          ) : (
-            <span className="font-mono">{submissionMinDeposit.toString()}</span>
-          )}
+          <span className="font-mono">
+            {formatUnits(submissionMinDeposit, resolvedTokenDecimals)} {resolvedTokenSymbol}
+          </span>
         </div>
         <div>
           Arbitration cost (msg.value):{" "}
@@ -470,7 +469,7 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
 
       <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <Label>Stake deposit ({tokenSymbol || "token"})</Label>
+          <Label>Stake deposit ({resolvedTokenSymbol || "token"})</Label>
           {tokenAddress ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -495,7 +494,7 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
         </div>
         <Input
           inputMode="decimal"
-          placeholder={tokenDecimals !== undefined ? formatUnits(submissionMinDeposit, tokenDecimals) : submissionMinDeposit.toString()}
+          placeholder={formatUnits(submissionMinDeposit, resolvedTokenDecimals)}
           value={depositInput}
           onChange={(e) => setValues((prev) => ({ ...prev, __deposit: e.target.value }))}
         />
@@ -508,7 +507,7 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
           disabled={loading || !isConnected || !onSepolia || !(columns?.length) || balanceIssues.length > 0}
           className="sm:flex-1"
         >
-          {loading ? "Working…" : balanceIssues.length > 0 ? "Insufficient balance" : needsApproval && !approvalStepDone ? `Approve ${tokenSymbol || "token"}` : "Submit"}
+          {loading ? "Working…" : balanceIssues.length > 0 ? "Insufficient balance" : needsApproval && !approvalStepDone ? `Approve ${resolvedTokenSymbol.toLowerCase()}` : "Submit"}
         </Button>
         {props.onCancel ? (
           <Button variant="outline" onClick={props.onCancel} disabled={loading}>

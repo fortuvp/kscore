@@ -19,6 +19,8 @@ type RegistryApiResponse =
       registry: {
         id: string;
         token: string;
+        tokenSymbol?: string | null;
+        tokenDecimals?: number | null;
         arbitrator: { id: string };
         challengeStakeMultiplier: string;
         winnerStakeMultiplier: string;
@@ -65,8 +67,7 @@ function mulDiv(a: bigint, b: bigint, div: bigint): bigint {
 }
 
 function formatTokenAmount(value: bigint, decimals: number | undefined, symbol: string | undefined) {
-  if (decimals === undefined) return value.toString();
-  return `${formatUnits(value, decimals)} ${symbol || "TOKEN"}`;
+  return `${formatUnits(value, decimals ?? 18)} ${symbol || "TOKEN"}`;
 }
 
 export function PgtcrDisputePanel(props: { itemID: string; className?: string }) {
@@ -131,6 +132,8 @@ export function PgtcrDisputePanel(props: { itemID: string; className?: string })
     functionName: "symbol",
     query: { enabled: Boolean(tokenAddress) },
   }).data as string | undefined;
+  const resolvedTokenDecimals = tokenDecimals ?? (registry && registry.success ? registry.registry.tokenDecimals ?? undefined : undefined) ?? 18;
+  const resolvedTokenSymbol = tokenSymbol || (registry && registry.success ? registry.registry.tokenSymbol || undefined : undefined) || "TOKEN";
 
   const multiplierDivisor = useReadContract({
     address: registryAddress,
@@ -344,7 +347,7 @@ export function PgtcrDisputePanel(props: { itemID: string; className?: string })
         </div>
         <div className="rounded-lg border border-amber-400/20 bg-black/10 p-3">
           <div className="text-[11px] uppercase tracking-wide text-amber-100/70">Challenge stake</div>
-          <div className="mt-1 text-sm text-amber-50">{formatTokenAmount(requiredChallengeStake, tokenDecimals, tokenSymbol)}</div>
+          <div className="mt-1 text-sm text-amber-50">{formatTokenAmount(requiredChallengeStake, resolvedTokenDecimals, resolvedTokenSymbol)}</div>
         </div>
         <div className="rounded-lg border border-amber-400/20 bg-black/10 p-3">
           <div className="text-[11px] uppercase tracking-wide text-amber-100/70">Latest ruling</div>

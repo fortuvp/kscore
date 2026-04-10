@@ -7,8 +7,15 @@ import {
   type AgentSubgraphNetwork,
 } from "@/lib/agent-networks";
 import { getCurateFallbackAgentByAgentId } from "@/lib/curate-agent-fallback.server";
+import type { AgentWithDetails } from "@/types/agent";
 
-const SUBGRAPH_LOOKUP_TIMEOUT_MS = 2500;
+const SUBGRAPH_LOOKUP_TIMEOUT_MS = 6000;
+
+function getFeedbackScore(agent: AgentWithDetails | null | undefined): number {
+  if (!agent) return -1;
+  const totalFeedback = Number.parseInt(agent.totalFeedback || "0", 10) || 0;
+  return Math.max(totalFeedback, agent.feedback?.length || 0);
+}
 
 function buildAgentIdCandidates(agentIdParam: string, network: AgentSubgraphNetwork): string[] {
   const trimmed = agentIdParam.trim();
@@ -20,6 +27,9 @@ function buildAgentIdCandidates(agentIdParam: string, network: AgentSubgraphNetw
   if (trimmed.startsWith("eip155:")) {
     const parts = trimmed.split(":");
     if (parts.length >= 3 && parts[2]) candidates.add(parts[2]);
+  } else if (/^\d+:\d+$/.test(trimmed)) {
+    const tail = trimmed.split(":").pop();
+    if (tail) candidates.add(tail);
   } else if (/^\d+$/.test(trimmed)) {
     candidates.add(`eip155:${AGENT_NETWORK_CHAIN_IDS[network]}:${trimmed}`);
   }
@@ -50,7 +60,7 @@ async function resolveAgentByAgentId(
 
       try {
         const agent = await Promise.race([
-          getAgentByAgentId(candidate, network),
+          getAgentByAgentId(candidate, network, 10, true),
           new Promise<null>((resolve) => {
             setTimeout(() => resolve(null), SUBGRAPH_LOOKUP_TIMEOUT_MS);
           }),
@@ -96,14 +106,27 @@ export async function GET(req: Request) {
       getCurateFallbackAgentByAgentId(agentIdParam, requestedNetwork),
     ]);
 
-    if (resolved.agent && resolved.network) {
+    const bestResolvedAgent =
+      curateFallback?.agent && getFeedbackScore(curateFallback.agent) > getFeedbackScore(resolved.agent)
+        ? curateFallback.agent
+        : resolved.agent;
+    const bestResolvedNetwork =
+      curateFallback?.agent && getFeedbackScore(curateFallback.agent) > getFeedbackScore(resolved.agent)
+        ? curateFallback.network
+        : resolved.network;
+    const bestResolvedAgentId =
+      curateFallback?.agent && getFeedbackScore(curateFallback.agent) > getFeedbackScore(resolved.agent)
+        ? curateFallback.agent.agentId
+        : resolved.agentId;
+
+    if (bestResolvedAgent && bestResolvedNetwork) {
       return NextResponse.json({
         success: true,
         found: true,
-        network: resolved.network,
+        network: bestResolvedNetwork,
         requestedNetwork,
-        agentId: resolved.agentId,
-        item: resolved.agent,
+        agentId: bestResolvedAgentId,
+        item: bestResolvedAgent,
       });
     }
 

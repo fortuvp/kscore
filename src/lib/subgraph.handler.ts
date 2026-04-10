@@ -233,7 +233,7 @@ const GET_AGENT_WITH_FEEDBACK_NO_STATS = gql`
 `;
 
 const GET_AGENT_BY_AGENT_ID = gql`
-  query GetAgentByAgentId($agentId: String!, $feedbackFirst: Int!) {
+  query GetAgentByAgentId($agentId: BigInt!, $agentStatsId: ID!, $feedbackFirst: Int!) {
     agents(where: { agentId: $agentId }, first: 1) {
       ${AGENT_FIELDS_FULL}
       feedback(where: { isRevoked: false }, orderBy: createdAt, orderDirection: desc, first: $feedbackFirst) {
@@ -256,7 +256,7 @@ const GET_AGENT_BY_AGENT_ID = gql`
         }
       }
     }
-    agentStats(id: $agentId) {
+    agentStats(id: $agentStatsId) {
       totalFeedback
       averageFeedbackValue
       averageValidationScore
@@ -268,7 +268,7 @@ const GET_AGENT_BY_AGENT_ID = gql`
 `;
 
 const GET_AGENT_BY_AGENT_ID_NO_STATS = gql`
-  query GetAgentByAgentIdNoStats($agentId: String!, $feedbackFirst: Int!) {
+  query GetAgentByAgentIdNoStats($agentId: BigInt!, $feedbackFirst: Int!) {
     agents(where: { agentId: $agentId }, first: 1) {
       ${AGENT_FIELDS_FULL}
       feedback(where: { isRevoked: false }, orderBy: createdAt, orderDirection: desc, first: $feedbackFirst) {
@@ -321,6 +321,18 @@ interface GetAgentsByOwnerParams {
     skip?: number;
     protocol?: string;
     network?: AgentSubgraphNetwork;
+}
+
+function normalizeAgentIdForQuery(agentId: string): string | null {
+    const trimmed = agentId.trim();
+    if (!trimmed) return null;
+    if (/^\d+$/.test(trimmed)) return trimmed;
+    if (/^\d+:\d+$/.test(trimmed)) return trimmed.split(":").pop() || null;
+    if (trimmed.startsWith("eip155:")) {
+        const tail = trimmed.split(":").pop()?.trim();
+        if (tail && /^\d+$/.test(tail)) return tail;
+    }
+    return null;
 }
 
 function isMissingAgentStatsField(error: unknown): boolean {
@@ -389,7 +401,8 @@ export async function getAgentsByOwner(params: GetAgentsByOwnerParams): Promise<
 export async function getAgentWithFeedback(
     id: string,
     feedbackFirst: number = 10,
-    network: AgentSubgraphNetwork = "sepolia"
+    network: AgentSubgraphNetwork = "sepolia",
+    skipChainRefresh = false
 ): Promise<AgentWithDetails | null> {
     const requestedFeedbackFirst = getReputationFeedbackRequestSize(network, feedbackFirst);
 
@@ -402,48 +415,65 @@ export async function getAgentWithFeedback(
         if (!response.agent) return null;
 
         const agent = { ...response.agent, stats: response.agentStats };
-        return refreshAgentFeedbackFromChain(network, agent, feedbackFirst);
+        return skipChainRefresh ? agent : refreshAgentFeedbackFromChain(network, agent, feedbackFirst);
     } catch (error) {
-        if (!isMissingAgentStatsField(error)) throw error;
+        try {
+            const fallbackResponse = await getClient(network).request<{
+                agent: (Agent & { feedback: Feedback[] }) | null;
+            }>(GET_AGENT_WITH_FEEDBACK_NO_STATS, { id, feedbackFirst: requestedFeedbackFirst });
 
-        const fallbackResponse = await getClient(network).request<{
-            agent: (Agent & { feedback: Feedback[] }) | null;
-        }>(GET_AGENT_WITH_FEEDBACK_NO_STATS, { id, feedbackFirst: requestedFeedbackFirst });
+            if (!fallbackResponse.agent) return null;
 
-        if (!fallbackResponse.agent) return null;
-
-        const agent = { ...fallbackResponse.agent, stats: null };
-        return refreshAgentFeedbackFromChain(network, agent, feedbackFirst);
+            const agent = { ...fallbackResponse.agent, stats: null };
+            return skipChainRefresh ? agent : refreshAgentFeedbackFromChain(network, agent, feedbackFirst);
+        } catch (fallbackError) {
+            if (!isMissingAgentStatsField(error)) throw error;
+            throw fallbackError;
+        }
     }
 }
 
 export async function getAgentByAgentId(
     agentId: string,
     network: AgentSubgraphNetwork = "sepolia",
-    feedbackFirst: number = 10
+    feedbackFirst: number = 10,
+    skipChainRefresh = false
 ): Promise<AgentWithDetails | null> {
+    const normalizedAgentId = normalizeAgentIdForQuery(agentId);
+    if (!normalizedAgentId) return null;
+
     const requestedFeedbackFirst = getReputationFeedbackRequestSize(network, feedbackFirst);
 
     try {
         const response = await getClient(network).request<{
             agents: (Agent & { feedback: Feedback[] })[];
             agentStats: AgentStats | null;
-        }>(GET_AGENT_BY_AGENT_ID, { agentId, feedbackFirst: requestedFeedbackFirst });
+        }>(GET_AGENT_BY_AGENT_ID, {
+            agentId: normalizedAgentId,
+            agentStatsId: normalizedAgentId,
+            feedbackFirst: requestedFeedbackFirst,
+        });
 
         if (!response.agents || response.agents.length === 0) return null;
 
         const agent = { ...response.agents[0], stats: response.agentStats };
-        return refreshAgentFeedbackFromChain(network, agent, feedbackFirst);
+        return skipChainRefresh ? agent : refreshAgentFeedbackFromChain(network, agent, feedbackFirst);
     } catch (error) {
-        if (!isMissingAgentStatsField(error)) throw error;
+        try {
+            const fallbackResponse = await getClient(network).request<{
+                agents: (Agent & { feedback: Feedback[] })[];
+            }>(GET_AGENT_BY_AGENT_ID_NO_STATS, {
+                agentId: normalizedAgentId,
+                feedbackFirst: requestedFeedbackFirst,
+            });
 
-        const fallbackResponse = await getClient(network).request<{
-            agents: (Agent & { feedback: Feedback[] })[];
-        }>(GET_AGENT_BY_AGENT_ID_NO_STATS, { agentId, feedbackFirst: requestedFeedbackFirst });
+            if (!fallbackResponse.agents || fallbackResponse.agents.length === 0) return null;
 
-        if (!fallbackResponse.agents || fallbackResponse.agents.length === 0) return null;
-
-        const agent = { ...fallbackResponse.agents[0], stats: null };
-        return refreshAgentFeedbackFromChain(network, agent, feedbackFirst);
+            const agent = { ...fallbackResponse.agents[0], stats: null };
+            return skipChainRefresh ? agent : refreshAgentFeedbackFromChain(network, agent, feedbackFirst);
+        } catch (fallbackError) {
+            if (!isMissingAgentStatsField(error)) throw error;
+            throw fallbackError;
+        }
     }
 }

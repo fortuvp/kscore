@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Search, Package, ArrowRightLeft, ShoppingCart } from "lucide-react";
-import { AGENT_SUBGRAPH_NETWORKS, getAgentSubgraphLabel } from "@/lib/agent-networks";
+import { AGENT_SUBGRAPH_NETWORKS, getAgentSubgraphLabel, isAgentSubgraphNetwork } from "@/lib/agent-networks";
 import { getAgentNetworkFromChainId, parseChainId } from "@/lib/block-explorer";
 import type { AgentWithDetails } from "@/types/agent";
 import { getDisplayName, truncateAddress } from "@/lib/format";
@@ -66,6 +66,10 @@ export default function MarketplacePage() {
   const [resolvedCurateKeys, setResolvedCurateKeys] = React.useState<Record<string, boolean>>({});
   const [curateNameByKey, setCurateNameByKey] = React.useState<Record<string, string>>({});
   const [pgtcrToken, setPgtcrToken] = React.useState<`0x${string}` | null>(null);
+  const [pgtcrTokenMeta, setPgtcrTokenMeta] = React.useState<{ symbol: string | null; decimals: number | null }>({
+    symbol: null,
+    decimals: null,
+  });
   const [myDisputes, setMyDisputes] = React.useState<MyDisputeRow[]>([]);
   const [myDisputesLoading, setMyDisputesLoading] = React.useState(false);
 
@@ -79,7 +83,13 @@ export default function MarketplacePage() {
       try {
         const res = await fetch('/api/pgtcr/registry', { cache: 'no-store' });
         const json = await res.json();
-        if (!cancelled && json?.success && json?.registry?.token) setPgtcrToken(json.registry.token as `0x${string}`);
+        if (!cancelled && json?.success && json?.registry?.token) {
+          setPgtcrToken(json.registry.token as `0x${string}`);
+          setPgtcrTokenMeta({
+            symbol: json.registry.tokenSymbol ?? null,
+            decimals: json.registry.tokenDecimals ?? null,
+          });
+        }
       } catch {}
     }
     void loadToken();
@@ -99,6 +109,9 @@ export default function MarketplacePage() {
     functionName: 'symbol',
     query: { enabled: Boolean(pgtcrToken) },
   }).data as string | undefined;
+
+  const resolvedPgtcrTokenDecimals = pgtcrTokenDecimals ?? pgtcrTokenMeta.decimals ?? 18;
+  const resolvedPgtcrTokenSymbol = pgtcrTokenSymbol || pgtcrTokenMeta.symbol || "";
 
   React.useEffect(() => {
     setSaleRequests(loadSaleRequests());
@@ -541,13 +554,17 @@ export default function MarketplacePage() {
               >
                 <div className="font-medium truncate">{row.name}</div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  {row.agentId || "-"} | {AGENT_SUBGRAPH_NETWORKS.includes(row.network as any) ? getAgentSubgraphLabel(row.network as any) : row.network}
+                  {row.agentId || "-"} | {isAgentSubgraphNetwork(row.network) ? getAgentSubgraphLabel(row.network) : row.network}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {row.source === "owned" ? <Badge variant="outline" className="text-[11px]">Owned</Badge> : null}
                   {row.curateStatus ? <Badge variant="outline" className="text-[11px]">{String(row.curateStatus).toLowerCase() === "submitted" || String(row.curateStatus).toLowerCase() === "reincluded" ? "Collateralized" : row.curateStatus}</Badge> : null}
                   {row.source === "curate" && !row.resolved ? <Badge variant="outline" className="text-[11px] text-amber-300">agent not found</Badge> : null}
-                  {row.collateral ? <Badge variant="outline" className="text-[11px]">{pgtcrTokenDecimals !== undefined ? formatUnits(BigInt(row.collateral), pgtcrTokenDecimals) : row.collateral} {pgtcrTokenSymbol || ""}</Badge> : null}
+                  {row.collateral ? (
+                    <Badge variant="outline" className="text-[11px]">
+                      {formatUnits(BigInt(row.collateral), resolvedPgtcrTokenDecimals)} {resolvedPgtcrTokenSymbol}
+                    </Badge>
+                  ) : null}
                 </div>
               </Link>
             ))}

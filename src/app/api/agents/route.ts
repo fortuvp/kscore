@@ -192,6 +192,10 @@ function buildAgentIdCandidates(query: string, network: AgentSubgraphNetwork): s
         const parts = trimmed.split(":");
         if (parts.length >= 3 && parts[2]) candidates.add(parts[2]);
     }
+    if (/^\d+:\d+$/.test(trimmed)) {
+        const tail = trimmed.split(":").pop();
+        if (tail) candidates.add(tail);
+    }
 
     if (/^\d+$/.test(trimmed)) {
         candidates.add(`eip155:${AGENT_NETWORK_CHAIN_IDS[network]}:${trimmed}`);

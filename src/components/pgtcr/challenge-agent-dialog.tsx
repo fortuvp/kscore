@@ -22,6 +22,8 @@ type RegistryApiResponse =
       registry: {
         id: string;
         token: string;
+        tokenSymbol?: string | null;
+        tokenDecimals?: number | null;
         arbitrator: { id: string };
         challengeStakeMultiplier: string;
         winnerStakeMultiplier: string;
@@ -108,6 +110,8 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
     functionName: "symbol",
     query: { enabled: Boolean(tokenAddress) },
   }).data as string | undefined;
+  const resolvedTokenDecimals = tokenDecimals ?? (registry && registry.success ? registry.registry.tokenDecimals ?? undefined : undefined) ?? 18;
+  const resolvedTokenSymbol = tokenSymbol || (registry && registry.success ? registry.registry.tokenSymbol || undefined : undefined) || "TOKEN";
 
   const arbitrationCost = useReadContract({
     address: arbitratorAddress,
@@ -223,7 +227,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
       return;
     }
     if (!hasEnoughTokenBalance) {
-      toast.error(`Insufficient ${tokenSymbol || "token"} balance.`);
+      toast.error(`Insufficient ${resolvedTokenSymbol.toLowerCase()} balance.`);
       return;
     }
     if (!hasEnoughNativeBalance) {
@@ -290,7 +294,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
   const balanceIssues: string[] = [];
 
   if (isConnected && onSepolia && !hasEnoughTokenBalance) {
-    balanceIssues.push(`Insufficient balance. Need ${tokenDecimals !== undefined ? formatUnits(requiredChallengeStake, tokenDecimals) : requiredChallengeStake.toString()} ${tokenSymbol || "TOKEN"} for the challenge stake.`);
+    balanceIssues.push(`Insufficient balance. Need ${formatUnits(requiredChallengeStake, resolvedTokenDecimals)} ${resolvedTokenSymbol} for the challenge stake.`);
   }
   if (isConnected && onSepolia && !hasEnoughNativeBalance) {
     balanceIssues.push(`Insufficient balance. Need ${formatEther(arbitrationCost || 0n)} ETH for arbitration.`);
@@ -310,11 +314,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
           <div className="rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground space-y-1">
             <div>ItemID: <span className="font-mono">{props.itemID}</span></div>
             <div>
-              Required challenge stake: {tokenDecimals !== undefined ? (
-                <span className="font-mono">{formatUnits(requiredChallengeStake, tokenDecimals)} {tokenSymbol || "TOKEN"}</span>
-              ) : (
-                <span className="font-mono">{requiredChallengeStake.toString()}</span>
-              )}
+              Required challenge stake: <span className="font-mono">{formatUnits(requiredChallengeStake, resolvedTokenDecimals)} {resolvedTokenSymbol}</span>
             </div>
             <div>
               Arbitration cost (msg.value): {arbitrationCost !== undefined ? <span className="font-mono">{formatEther(arbitrationCost)} ETH</span> : "-"}
@@ -352,7 +352,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
                   : balanceIssues.length > 0
                     ? "Insufficient balance"
                     : needsApproval && !approvalStepDone
-                      ? `Approve ${tokenSymbol || "token"}`
+                      ? `Approve ${resolvedTokenSymbol.toLowerCase()}`
                       : "Challenge"}
             </Button>
           </div>
