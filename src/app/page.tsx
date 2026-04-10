@@ -16,28 +16,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { type AgentSubgraphNetwork } from "@/lib/agent-networks";
 
-type RankedAgent = {
-  id: string;
-  name: string;
-  network: AgentSubgraphNetwork;
-  totalFeedback: number;
-};
-
-type StatsResponse = {
-  success: boolean;
-  generatedAt: string;
-  stats: {
-    totalAgents: number;
-    active7d: number;
-    totalReviews: number;
-  };
-  lists: {
-    trending: RankedAgent[];
-    topRated: RankedAgent[];
-    mostReviewed: RankedAgent[];
-  };
-};
-
 type HighlightsResponse = {
   success: boolean;
   verifiedAgents: Array<{
@@ -104,7 +82,6 @@ function formatStake(raw: string | undefined, decimals = 18) {
 }
 
 export default function HomePage() {
-  const [, setStats] = React.useState<StatsResponse | null>(null);
   const [highlights, setHighlights] = React.useState<HighlightsResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
 
@@ -117,28 +94,11 @@ export default function HomePage() {
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [statsRes, highlightsRes] = await Promise.allSettled([
-        fetch("/api/stats?sampleSize=50000", { cache: "no-store" }),
-        fetch("/api/home/highlights", { cache: "no-store" }),
-      ]);
-
-      if (statsRes.status === "fulfilled") {
-        try {
-          const statsJson = (await statsRes.value.json()) as StatsResponse;
-          if (statsJson.success) setStats(statsJson);
-        } catch {
-          // Keep previous stats on parse failure.
-        }
-      }
-
-      if (highlightsRes.status === "fulfilled") {
-        try {
-          const highlightsJson = (await highlightsRes.value.json()) as HighlightsResponse;
-          if (highlightsJson.success) setHighlights(highlightsJson);
-        } catch {
-          // Keep previous highlights on parse failure.
-        }
-      }
+      const highlightsRes = await fetch("/api/home/highlights", { cache: "no-store" });
+      const highlightsJson = (await highlightsRes.json()) as HighlightsResponse;
+      if (highlightsJson.success) setHighlights(highlightsJson);
+    } catch {
+      // Keep previous highlights on request failure.
     } finally {
       setLoading(false);
     }

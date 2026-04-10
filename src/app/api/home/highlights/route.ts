@@ -5,6 +5,7 @@ import { getAgentByAgentId } from "@/lib/subgraph.handler";
 import { getDisplayName } from "@/lib/format";
 import { AGENT_SUBGRAPH_NETWORKS, type AgentSubgraphNetwork } from "@/lib/agent-networks";
 import { getAgentNetworkFromChainId, parseChainId } from "@/lib/block-explorer";
+import { loadCurateRegistrationFile } from "@/lib/curate-agent-fallback";
 import {
   getCurateMode,
   getCurateRegistryAddress,
@@ -19,6 +20,8 @@ import { REALITIO_ABI } from "@/lib/abi/realitio";
 import { REALITY_PROXY_ADDRESS } from "@/lib/contracts/addresses";
 import { parseAgentIdFromQuestionText } from "@/lib/reality/abuse-flags";
 import { bytes32ToYesNo } from "@/lib/reality/encoding";
+
+const SUBGRAPH_LOOKUP_TIMEOUT_MS = 2500;
 
 type ModerationRow = {
   questionId: `0x${string}`;
@@ -88,6 +91,7 @@ const GET_LATEST_PGTCR_ITEMS = gql`
       stake
       metadata {
         key0
+        key1
         key2
       }
       registry {
@@ -137,30 +141,55 @@ async function resolveAgentForCurateEntry(
   hintedNetwork: AgentSubgraphNetwork | null
 ): Promise<{ id: string; agentId: string; name: string; network: AgentSubgraphNetwork } | null> {
   if (hintedNetwork) {
-    const agent = await getAgentByAgentId(key0, hintedNetwork);
-    if (agent) {
-      return {
-        id: agent.id,
-        agentId: agent.agentId,
-        name: getDisplayName(agent),
-        network: hintedNetwork,
-      };
+    try {
+      const agent = await Promise.race([
+        getAgentByAgentId(key0, hintedNetwork),
+        new Promise<null>((resolve) => {
+          setTimeout(() => resolve(null), SUBGRAPH_LOOKUP_TIMEOUT_MS);
+        }),
+      ]);
+      if (agent) {
+        return {
+          id: agent.id,
+          agentId: agent.agentId,
+          name: getDisplayName(agent),
+          network: hintedNetwork,
+        };
+      }
+    } catch {
+      // keep trying other networks
     }
+
+    return null;
   }
 
   for (const network of AGENT_SUBGRAPH_NETWORKS) {
     if (network === hintedNetwork) continue;
-    const agent = await getAgentByAgentId(key0, network);
-    if (!agent) continue;
-    return {
-      id: agent.id,
-      agentId: agent.agentId,
-      name: getDisplayName(agent),
-      network,
-    };
+    try {
+      const agent = await Promise.race([
+        getAgentByAgentId(key0, network),
+        new Promise<null>((resolve) => {
+          setTimeout(() => resolve(null), SUBGRAPH_LOOKUP_TIMEOUT_MS);
+        }),
+      ]);
+      if (!agent) continue;
+      return {
+        id: agent.id,
+        agentId: agent.agentId,
+        name: getDisplayName(agent),
+        network,
+      };
+    } catch {
+      // keep trying other networks
+    }
   }
 
   return null;
+}
+
+async function getFallbackVerifiedName(key0: string, key1?: string | null) {
+  const registrationFile = await loadCurateRegistrationFile(key1 || null);
+  return registrationFile?.name || `Agent #${key0}`;
 }
 
 async function getVerifiedAgents() {
@@ -245,6 +274,7 @@ async function getVerifiedAgents() {
         stake: string;
         metadata?: {
           key0?: string | null;
+          key1?: string | null;
           key2?: string | null;
         } | null;
         registry: {
@@ -286,12 +316,14 @@ async function getVerifiedAgents() {
       try {
         const resolved = await resolveAgentForCurateEntry(key0, network);
         if (!resolved) {
+          const fallbackName = await getFallbackVerifiedName(key0, row.metadata?.key1 || null);
           verified.push({
-            id: row.itemID,
+            id: key0,
             agentId: key0,
             name: `Curate item ${row.itemID.slice(0, 10)}…`,
             network: network || "sepolia",
             curateItemUrl: `https://curate.kleros.io/tcr/11155111/${registryAddress}/${row.itemID}`,
+            ...{ name: fallbackName, curateItemUrl: undefined },
             stake: row.stake || "0",
             verifiedAt: Number(row.includedAt) || 0,
           });
@@ -303,7 +335,15 @@ async function getVerifiedAgents() {
           verifiedAt: Number(row.includedAt) || 0,
         });
       } catch {
-        // keep scanning
+        const fallbackName = await getFallbackVerifiedName(key0, row.metadata?.key1 || null);
+        verified.push({
+          id: key0,
+          agentId: key0,
+          name: fallbackName,
+          network: network || "sepolia",
+          stake: row.stake || "0",
+          verifiedAt: Number(row.includedAt) || 0,
+        });
       }
     }
   } catch {

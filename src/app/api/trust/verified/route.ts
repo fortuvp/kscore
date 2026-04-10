@@ -22,9 +22,12 @@ type VerifiedStatus = "active" | "challenged" | "removed";
 
 type ResolvedTrustRow = {
   id: string;
+  key0: string;
   agentId: string;
   name: string;
   network: AgentSubgraphNetwork;
+  sourceNetwork: AgentSubgraphNetwork | null;
+  resolved: boolean;
   lookupByAgentId?: boolean;
   status: VerifiedStatus;
   curateStatus: string;
@@ -271,6 +274,9 @@ async function getTrustRows(): Promise<ResolvedTrustRow[]> {
         if (agent) {
           return {
             ...agent,
+            key0: entry.key0,
+            sourceNetwork: entry.network,
+            resolved: true,
             status: entry.status,
             curateStatus: entry.curateStatus,
             updatedAt: entry.updatedAt,
@@ -282,9 +288,12 @@ async function getTrustRows(): Promise<ResolvedTrustRow[]> {
 
       return {
         id: entry.key0,
+        key0: entry.key0,
         agentId: entry.key0,
         name: `Agent ${entry.key0}`,
         network: entry.network || "sepolia",
+        sourceNetwork: entry.network,
+        resolved: false,
         lookupByAgentId: true,
         status: entry.status,
         curateStatus: entry.curateStatus,

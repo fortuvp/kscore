@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { AgentCard } from "@/components/agents/agent-card";
 import type { Agent } from "@/types/agent";
 import { truncateAddress, getDisplayName, formatDate } from "@/lib/format";
-import { getAddressExplorerUrl, getAddressExplorerUrlForNetwork } from "@/lib/block-explorer";
+import { getAddressExplorerUrl, getAddressExplorerUrlForNetwork, getAgentNetworkFromChainId } from "@/lib/block-explorer";
 import { useRealityQuestions } from "@/lib/reality/use-questions";
 import { parseAgentIdFromQuestionText } from "@/lib/reality/abuse-flags";
 import {
@@ -28,6 +28,8 @@ import {
     isAgentSubgraphNetwork,
     type AgentSubgraphNetwork,
 } from "@/lib/agent-networks";
+
+type AgentRegistryNetwork = AgentSubgraphNetwork | "all";
 
 type AgentTrustSignals = {
     collateralized: boolean;
@@ -74,14 +76,14 @@ function AgentsContent() {
     const searchParams = useSearchParams();
     const initialQuery = searchParams.get("q") || "";
     const initialNetworkParam = searchParams.get("network");
-    const initialNetwork: AgentSubgraphNetwork = isAgentSubgraphNetwork(initialNetworkParam)
+    const initialNetwork: AgentRegistryNetwork = isAgentSubgraphNetwork(initialNetworkParam)
         ? initialNetworkParam
-        : "sepolia";
+        : "all";
 
     const [agents, setAgents] = useState<Agent[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState(initialQuery);
-    const [network, setNetwork] = useState<AgentSubgraphNetwork>(initialNetwork);
+    const [network, setNetwork] = useState<AgentRegistryNetwork>(initialNetwork);
     const [sortBy, setSortBy] = useState("createdAt:desc");
     const [protocolFilter, setProtocolFilter] = useState("all");
     const [currentPage, setCurrentPage] = useState(1);
@@ -93,19 +95,29 @@ function AgentsContent() {
     const [trustByKey, setTrustByKey] = useState<Record<string, AgentTrustSignals>>({});
     const [trustLoading, setTrustLoading] = useState(false);
 
+    const resolveAgentNetwork = useCallback(
+        (agent: Agent): AgentSubgraphNetwork => getAgentNetworkFromChainId(agent.chainId) || (network === "all" ? "sepolia" : network),
+        [network]
+    );
+
     const fetchAgents = useCallback(async (page: number = 1, query?: string) => {
         setIsLoading(true);
         const searchTerm = query !== undefined ? query : searchQuery;
         const isReportWideFetch = reportFilter !== "all";
-        const requestedPage = isReportWideFetch ? 1 : page;
-        const requestedPageSize = isReportWideFetch ? "300" : perPage;
+        const isCollateralWideFetch = collateralFilter !== "all";
+        const requestedPage = isReportWideFetch || isCollateralWideFetch ? 1 : page;
+        const requestedPageSize = isReportWideFetch || isCollateralWideFetch ? "300" : perPage;
+        const requestNetwork =
+            network === "all" && collateralFilter === "collateralized"
+                ? "sepolia"
+                : network;
         try {
             const params = new URLSearchParams({
                 page: requestedPage.toString(),
                 pageSize: requestedPageSize,
                 sort: sortBy,
-                network,
             });
+            params.set("network", requestNetwork);
             if (searchTerm) params.set("q", searchTerm);
             if (protocolFilter !== "all") params.set("protocol", protocolFilter);
 
@@ -114,7 +126,7 @@ function AgentsContent() {
 
             if (data.success) {
                 setAgents(data.items);
-                setHasMore(isReportWideFetch ? false : data.hasMore);
+                setHasMore(isReportWideFetch || isCollateralWideFetch ? false : data.hasMore);
                 setCurrentPage(requestedPage);
             }
         } catch (error) {
@@ -122,7 +134,7 @@ function AgentsContent() {
         } finally {
             setIsLoading(false);
         }
-    }, [searchQuery, perPage, sortBy, protocolFilter, network, reportFilter]);
+    }, [searchQuery, perPage, sortBy, protocolFilter, network, reportFilter, collateralFilter]);
 
     useEffect(() => {
         fetchAgents(1, searchQuery);
@@ -140,11 +152,12 @@ function AgentsContent() {
             try {
                 const updates = await Promise.all(
                     agents.map(async (agent) => {
-                        const key = `${network}:${agent.agentId.toLowerCase()}`;
+                        const agentNetwork = resolveAgentNetwork(agent);
+                        const key = `${agentNetwork}:${agent.agentId.toLowerCase()}`;
 
                         try {
                             const res = await fetch(
-                                `/api/kleros/verification?agentId=${encodeURIComponent(agent.agentId)}&network=${encodeURIComponent(network)}`,
+                                `/api/kleros/verification?agentId=${encodeURIComponent(agent.agentId)}&network=${encodeURIComponent(agentNetwork)}`,
                                 { cache: "no-store" }
                             );
                             const json = await res.json();
@@ -169,19 +182,19 @@ function AgentsContent() {
         return () => {
             cancelled = true;
         };
-    }, [agents, network]);
+    }, [agents, resolveAgentNetwork]);
 
     const reportedByKey = useMemo(() => {
         const next: Record<string, boolean> = {};
         for (const agent of agents) {
-            const key = `${network}:${agent.agentId.toLowerCase()}`;
+            const key = `${resolveAgentNetwork(agent)}:${agent.agentId.toLowerCase()}`;
             next[key] = realityQuestions.data.some((q) => matchesReportedAgent(q.question, String(agent.agentId)));
         }
         return next;
-    }, [agents, network, realityQuestions.data]);
+    }, [agents, resolveAgentNetwork, realityQuestions.data]);
 
     const filteredAgents = agents.filter((agent) => {
-        const key = `${network}:${agent.agentId.toLowerCase()}`;
+        const key = `${resolveAgentNetwork(agent)}:${agent.agentId.toLowerCase()}`;
         const trust = trustByKey[key];
         const reported = reportedByKey[key] || false;
 
@@ -240,6 +253,10 @@ function AgentsContent() {
                         <Select
                             value={network}
                             onValueChange={(value) => {
+                                if (value === "all") {
+                                    setNetwork("all");
+                                    return;
+                                }
                                 if (isAgentSubgraphNetwork(value)) setNetwork(value);
                             }}
                         >
@@ -247,6 +264,7 @@ function AgentsContent() {
                                 <SelectValue placeholder="Chain" />
                             </SelectTrigger>
                             <SelectContent>
+                                <SelectItem value="all">All networks</SelectItem>
                                 {AGENT_SUBGRAPH_NETWORKS.map((networkKey) => (
                                     <SelectItem key={networkKey} value={networkKey}>
                                         {getAgentSubgraphLabel(networkKey)}
@@ -347,15 +365,16 @@ function AgentsContent() {
                                 </TableRow>
                             ) : (
                                 filteredAgents.map((agent) => {
+                                    const agentNetwork = resolveAgentNetwork(agent);
                                     const ownerExplorerUrl =
                                         getAddressExplorerUrl(agent.owner, agent.chainId) ||
-                                        getAddressExplorerUrlForNetwork(agent.owner, network);
-                                    const trust = trustByKey[`${network}:${agent.agentId.toLowerCase()}`];
-                                    const agentHref = `/agents/${encodeURIComponent(agent.id)}?network=${network}`;
+                                        getAddressExplorerUrlForNetwork(agent.owner, agentNetwork);
+                                    const trust = trustByKey[`${agentNetwork}:${agent.agentId.toLowerCase()}`];
+                                    const agentHref = `/agents/${encodeURIComponent(agent.id)}?network=${agentNetwork}`;
 
                                     return (
                                         <TableRow
-                                            key={agent.id}
+                                            key={`${agentNetwork}:${agent.id}`}
                                             className="cursor-pointer border-border/30 transition-colors hover:bg-muted/30"
                                             role="link"
                                             tabIndex={0}
@@ -371,6 +390,7 @@ function AgentsContent() {
                                                 <div className="flex items-center gap-3">
                                                     <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted overflow-hidden shrink-0">
                                                         {agent.registrationFile?.image ? (
+                                                            // eslint-disable-next-line @next/next/no-img-element
                                                             <img
                                                                 src={agent.registrationFile.image}
                                                                 alt={getDisplayName(agent)}
@@ -406,7 +426,7 @@ function AgentsContent() {
                                                     variant="outline"
                                                     className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20 font-medium"
                                                 >
-                                                    {getAgentChainLabel(agent.chainId, network)}
+                                                    {getAgentChainLabel(agent.chainId, agentNetwork)}
                                                 </Badge>
                                             </TableCell>
                                             <TableCell>
@@ -448,9 +468,10 @@ function AgentsContent() {
                         <div className="flex h-32 items-center justify-center text-muted-foreground">No agents found</div>
                     ) : (
                         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                            {filteredAgents.map((agent) => (
-                                <AgentCard key={agent.id} agent={agent} network={network} />
-                            ))}
+                            {filteredAgents.map((agent) => {
+                                const agentNetwork = resolveAgentNetwork(agent);
+                                return <AgentCard key={`${agentNetwork}:${agent.id}`} agent={agent} network={agentNetwork} />;
+                            })}
                         </div>
                     )}
                 </div>

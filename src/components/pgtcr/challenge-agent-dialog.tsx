@@ -147,7 +147,8 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
     query: { enabled: Boolean(address) },
   }).data?.value;
 
-  const needsApproval = Boolean(allowance !== undefined && allowance < requiredChallengeStake);
+  const dataReady = multiplierDivisor !== undefined && arbitrationCost !== undefined && allowance !== undefined;
+  const needsApproval = Boolean(dataReady && allowance < requiredChallengeStake);
   const hasEnoughTokenBalance = tokenBalance === undefined || tokenBalance >= requiredChallengeStake;
   const hasEnoughNativeBalance = arbitrationCost === undefined || nativeBalance === undefined || nativeBalance >= arbitrationCost;
 
@@ -213,6 +214,10 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
       toast.error("Registry not loaded.");
       return;
     }
+    if (!dataReady) {
+      toast.error("Contract data still loading. Please wait.");
+      return;
+    }
     if (!arbitrationCost && arbitrationCost !== 0n) {
       toast.error("Arbitration cost not available.");
       return;
@@ -263,6 +268,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
         functionName: "challengeItem",
         args: [props.itemID as `0x${string}`, evidenceUri],
         value: arbitrationCost,
+        gas: 500000n,
       });
 
       toast.success("Challenge submitted.");
@@ -337,7 +343,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
             <Button
               className="sm:flex-1"
               onClick={() => void onChallenge()}
-              disabled={submitting || !isConnected || !onSepolia || Boolean(activeDispute) || balanceIssues.length > 0}
+              disabled={submitting || !isConnected || !onSepolia || !dataReady || Boolean(activeDispute) || balanceIssues.length > 0}
             >
               {submitting
                 ? "Working…"

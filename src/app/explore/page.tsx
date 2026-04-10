@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   Activity,
   ArrowRight,
@@ -18,9 +17,9 @@ import {
 import { formatUnits } from "viem";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { getAgentNetworkFromChainId } from "@/lib/block-explorer";
 import { getDisplayName } from "@/lib/format";
 import {
-  AGENT_SUBGRAPH_NETWORKS,
   getAgentSubgraphLabel,
   type AgentSubgraphNetwork,
 } from "@/lib/agent-networks";
@@ -97,13 +96,8 @@ type ActivityDigest = {
   active?: number;
 };
 
-type SearchSuggestion = {
-  id: string;
-  agentId: string;
-  name: string;
-  image: string | null;
-  network: AgentSubgraphNetwork;
-};
+const EXPLORE_STATS_SAMPLE_SIZE = 3000;
+const EXPLORE_SEARCH_TIMEOUT_MS = 5000;
 
 function formatAgo(timestamp: number) {
   const now = Math.floor(Date.now() / 1000);
@@ -132,112 +126,101 @@ function moderationTone(answer: HighlightsResponse["moderation"][number]["answer
 }
 
 export default function ExplorePage() {
-  const router = useRouter();
   const [verifiedFilter, setVerifiedFilter] = React.useState<"highestStake" | "latest">("highestStake");
   const [query, setQuery] = React.useState("");
-  const [searchingSuggestions, setSearchingSuggestions] = React.useState(false);
-  const [showSuggestions, setShowSuggestions] = React.useState(false);
-  const [suggestions, setSuggestions] = React.useState<SearchSuggestion[]>([]);
+  const [searchedAgents, setSearchedAgents] = React.useState<Agent[]>([]);
+  const [searchingAgents, setSearchingAgents] = React.useState(false);
+  const [hasSearchedAgents, setHasSearchedAgents] = React.useState(false);
+  const [searchError, setSearchError] = React.useState<string | null>(null);
   const [stats, setStats] = React.useState<StatsResponse | null>(null);
   const [highlights, setHighlights] = React.useState<HighlightsResponse | null>(null);
   const [previewByKey, setPreviewByKey] = React.useState<Record<string, AgentPreview>>({});
   const [loading, setLoading] = React.useState(true);
-  const searchPanelRef = React.useRef<HTMLDivElement | null>(null);
 
   const load = React.useCallback(async () => {
     setLoading(true);
+    const loadStats = (async () => {
+      try {
+        const statsRes = await fetch(`/api/stats?sampleSize=${EXPLORE_STATS_SAMPLE_SIZE}`, { cache: "no-store" });
+        const statsJson = (await statsRes.json()) as StatsResponse;
+        if (statsJson.success) setStats(statsJson);
+      } catch {
+        // Keep previous stats if the sample fails to load.
+      }
+    })();
+
     try {
-      const [statsRes, highlightsRes] = await Promise.allSettled([
-        fetch("/api/stats?sampleSize=50000", { cache: "no-store" }),
-        fetch("/api/home/highlights", { cache: "no-store" }),
-      ]);
-
-      if (statsRes.status === "fulfilled") {
-        try {
-          const statsJson = (await statsRes.value.json()) as StatsResponse;
-          if (statsJson.success) setStats(statsJson);
-        } catch {
-          // Keep previous stats if parse fails.
-        }
-      }
-
-      if (highlightsRes.status === "fulfilled") {
-        try {
-          const highlightsJson = (await highlightsRes.value.json()) as HighlightsResponse;
-          if (highlightsJson.success) setHighlights(highlightsJson);
-        } catch {
-          // Keep previous highlights if parse fails.
-        }
-      }
+      const highlightsRes = await fetch("/api/home/highlights", { cache: "no-store" });
+      const highlightsJson = (await highlightsRes.json()) as HighlightsResponse;
+      if (highlightsJson.success) setHighlights(highlightsJson);
+    } catch {
+      // Keep previous highlights if the request fails.
     } finally {
       setLoading(false);
     }
+
+    void loadStats;
   }, []);
 
   React.useEffect(() => {
     void load();
   }, [load]);
 
+  const runAgentSearch = React.useCallback(async () => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setHasSearchedAgents(false);
+      setSearchedAgents([]);
+      setSearchError(null);
+      return;
+    }
+
+    setSearchingAgents(true);
+    setHasSearchedAgents(true);
+    setSearchError(null);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), EXPLORE_SEARCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(`/api/agents?q=${encodeURIComponent(trimmed)}&pageSize=12&network=all`, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || `Search failed (${res.status})`);
+
+      if (json?.success && json.items?.length > 0) {
+        setSearchedAgents(json.items as Agent[]);
+      } else {
+        setSearchedAgents([]);
+      }
+    } catch (error) {
+      console.error(error);
+      setSearchedAgents([]);
+      setSearchError(
+        error instanceof DOMException && error.name === "AbortError"
+          ? "Search timed out. Try a more specific name."
+          : error instanceof Error
+            ? error.message
+            : "Search failed"
+      );
+    } finally {
+      window.clearTimeout(timeout);
+      setSearchingAgents(false);
+    }
+  }, [query]);
+
   React.useEffect(() => {
-    const onWindowPointerDown = (event: MouseEvent) => {
-      if (!searchPanelRef.current) return;
-      if (!searchPanelRef.current.contains(event.target as Node)) {
-        setShowSuggestions(false);
-      }
-    };
-    window.addEventListener("mousedown", onWindowPointerDown);
-    return () => window.removeEventListener("mousedown", onWindowPointerDown);
-  }, []);
-
-  React.useEffect(() => {
-    const handle = window.setTimeout(async () => {
-      const trimmed = query.trim();
-      if (trimmed.length < 2) {
-        setSuggestions([]);
-        return;
-      }
-
-      setSearchingSuggestions(true);
-      try {
-        const groups = await Promise.all(
-          AGENT_SUBGRAPH_NETWORKS.map(async (network) => {
-            const res = await fetch(
-              `/api/agents?q=${encodeURIComponent(trimmed)}&network=${encodeURIComponent(network)}&pageSize=4`,
-              { cache: "no-store" }
-            );
-            if (!res.ok) return [] as SearchSuggestion[];
-            const json = await res.json();
-            const items = (json?.items || []) as Agent[];
-            return items.map((item) => ({
-              id: item.id,
-              agentId: item.agentId,
-              name: getDisplayName(item),
-              image: item.registrationFile?.image || null,
-              network,
-            }));
-          })
-        );
-
-        const unique = new Map<string, SearchSuggestion>();
-        for (const group of groups) {
-          for (const item of group) unique.set(`${item.network}:${item.id}`, item);
-        }
-        setSuggestions(Array.from(unique.values()).slice(0, 8));
-      } catch {
-        setSuggestions([]);
-      } finally {
-        setSearchingSuggestions(false);
-      }
-    }, 260);
-
-    return () => window.clearTimeout(handle);
+    if (query.trim()) return;
+    setHasSearchedAgents(false);
+    setSearchedAgents([]);
+    setSearchError(null);
   }, [query]);
 
   React.useEffect(() => {
     let cancelled = false;
     async function hydratePreviews() {
       if (!stats) return;
-      const ranked = [...(stats.lists.topRated || []).slice(0, 20), ...(stats.lists.mostReviewed || []).slice(0, 20)];
+      const ranked = [...(stats.lists.topRated || []).slice(0, 14), ...(stats.lists.mostReviewed || []).slice(0, 14)];
 
       const unique = new Map<string, RankedAgent>();
       for (const item of ranked) unique.set(`${item.network}:${item.id}`, item);
@@ -324,16 +307,6 @@ export default function ExplorePage() {
     return rows;
   }, [highlights?.verifiedAgents, verifiedFilter]);
 
-  const onSearch = () => {
-    const trimmed = query.trim();
-    if (!trimmed) {
-      router.push("/agents");
-      return;
-    }
-    setShowSuggestions(false);
-    router.push(`/agents?q=${encodeURIComponent(trimmed)}`);
-  };
-
   return (
     <div className="relative overflow-hidden">
       <div className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(180deg,#010308_0%,#03070e_52%,#040a12_100%)]" />
@@ -348,14 +321,8 @@ export default function ExplorePage() {
           </p>
         </section>
 
-        {loading ? (
-          <div className="mt-8 flex items-center justify-center py-12 text-white/70">
-            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-            Loading explore data...
-          </div>
-        ) : (
-          <>
-            <section className="grid gap-4 lg:grid-cols-2">
+        <>
+          <section className="grid gap-4 lg:grid-cols-2">
               <div className="min-w-0 overflow-hidden rounded-xl border border-white/15 bg-black/30 p-4">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
@@ -391,48 +358,59 @@ export default function ExplorePage() {
                   </div>
                 </div>
                 <div className="min-h-[13.5rem] max-h-[13.5rem] space-y-2 overflow-x-hidden overflow-y-auto pr-1">
-                  {visibleVerifiedAgents.map((item, index) => {
-                    const href = item.curateItemUrl || `/agents/${encodeURIComponent(item.id)}?network=${item.network}`;
-                    const external = Boolean(item.curateItemUrl);
-                    const verifiedAt = Number(item.verifiedAt || 0);
-                    const topStake = verifiedFilter === "highestStake" && index === 0;
-                    const podiumStake = verifiedFilter === "highestStake" && index < 3;
-                    const stakeValue = formatStake(item.stake, Number(highlights?.verifiedStakeDecimals || 18));
-                    return (
-                      <Link
-                        key={`${item.network}:${item.id}`}
-                        href={href}
-                        target={external ? "_blank" : undefined}
-                        rel={external ? "noreferrer" : undefined}
-                        className={`block h-[66px] min-w-0 rounded-md border px-2.5 py-1.5 text-xs text-white/85 transition ${
-                          topStake
-                            ? "border-emerald-300/45 bg-gradient-to-r from-emerald-500/18 to-cyan-500/12 shadow-[0_0_0_1px_rgba(110,231,183,0.08),0_0_18px_rgba(16,185,129,0.22)]"
-                            : podiumStake
-                              ? "border-emerald-500/28 bg-emerald-500/10 shadow-[0_0_0_1px_rgba(110,231,183,0.04),0_0_12px_rgba(16,185,129,0.1)]"
-                              : "border-emerald-500/20 bg-emerald-500/8 shadow-[0_0_0_1px_rgba(110,231,183,0.03),0_0_10px_rgba(16,185,129,0.08)] hover:border-emerald-500/40 hover:shadow-[0_0_0_1px_rgba(110,231,183,0.08),0_0_14px_rgba(16,185,129,0.12)]"
-                        }`}
-                      >
-                        <div className="flex h-full min-w-0 flex-col justify-between">
-                          <div className="flex min-w-0 items-start justify-between gap-2">
-                            <div className="min-w-0 truncate text-sm font-medium">
-                              {item.name} <span className="text-[10px] text-white/45">#{item.agentId}</span>
+                  {loading && !highlights ? (
+                    <div className="flex h-full min-h-[13.5rem] items-center justify-center text-xs text-white/65">
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Loading verified agents...
+                    </div>
+                  ) : visibleVerifiedAgents.length > 0 ? (
+                    visibleVerifiedAgents.map((item, index) => {
+                      const href = item.curateItemUrl || `/agents/${encodeURIComponent(item.id)}?network=${item.network}`;
+                      const external = Boolean(item.curateItemUrl);
+                      const verifiedAt = Number(item.verifiedAt || 0);
+                      const topStake = verifiedFilter === "highestStake" && index === 0;
+                      const podiumStake = verifiedFilter === "highestStake" && index < 3;
+                      const stakeValue = formatStake(item.stake, Number(highlights?.verifiedStakeDecimals || 18));
+                      return (
+                        <Link
+                          key={`${item.network}:${item.id}`}
+                          href={href}
+                          target={external ? "_blank" : undefined}
+                          rel={external ? "noreferrer" : undefined}
+                          className={`block h-[66px] min-w-0 rounded-md border px-2.5 py-1.5 text-xs text-white/85 transition ${
+                            topStake
+                              ? "border-emerald-300/45 bg-gradient-to-r from-emerald-500/18 to-cyan-500/12 shadow-[0_0_0_1px_rgba(110,231,183,0.08),0_0_18px_rgba(16,185,129,0.22)]"
+                              : podiumStake
+                                ? "border-emerald-500/28 bg-emerald-500/10 shadow-[0_0_0_1px_rgba(110,231,183,0.04),0_0_12px_rgba(16,185,129,0.1)]"
+                                : "border-emerald-500/20 bg-emerald-500/8 shadow-[0_0_0_1px_rgba(110,231,183,0.03),0_0_10px_rgba(16,185,129,0.08)] hover:border-emerald-500/40 hover:shadow-[0_0_0_1px_rgba(110,231,183,0.08),0_0_14px_rgba(16,185,129,0.12)]"
+                          }`}
+                        >
+                          <div className="flex h-full min-w-0 flex-col justify-between">
+                            <div className="flex min-w-0 items-start justify-between gap-2">
+                              <div className="min-w-0 truncate text-sm font-medium">
+                                {item.name} <span className="text-[10px] text-white/45">#{item.agentId}</span>
+                              </div>
+                              {podiumStake ? (
+                                <Badge className="shrink-0 border-emerald-300/40 bg-emerald-300/18 px-1.5 py-0 text-[10px] text-emerald-100">
+                                  #{index + 1}
+                                </Badge>
+                              ) : null}
                             </div>
-                            {podiumStake ? (
-                              <Badge className="shrink-0 border-emerald-300/40 bg-emerald-300/18 px-1.5 py-0 text-[10px] text-emerald-100">
-                                #{index + 1}
-                              </Badge>
-                            ) : null}
+                            <div className="flex min-w-0 items-center justify-between gap-2 text-[10px]">
+                              <span className="truncate rounded-full border border-emerald-300/40 bg-emerald-300/16 px-1.5 py-0.5 font-semibold text-emerald-100">
+                                Stake {stakeValue} {highlights?.verifiedStakeSymbol || "TOKEN"}
+                              </span>
+                              <span className="shrink-0 text-white/55">{verifiedAt > 0 ? formatAgo(verifiedAt) : "-"}</span>
+                            </div>
                           </div>
-                          <div className="flex min-w-0 items-center justify-between gap-2 text-[10px]">
-                            <span className="truncate rounded-full border border-emerald-300/40 bg-emerald-300/16 px-1.5 py-0.5 font-semibold text-emerald-100">
-                              Stake {stakeValue} {highlights?.verifiedStakeSymbol || "TOKEN"}
-                            </span>
-                            <span className="shrink-0 text-white/55">{verifiedAt > 0 ? formatAgo(verifiedAt) : "-"}</span>
-                          </div>
-                        </div>
-                      </Link>
-                    );
-                  })}
+                        </Link>
+                      );
+                    })
+                  ) : (
+                    <div className="flex h-full min-h-[13.5rem] items-center justify-center text-xs text-white/65">
+                      Verified agents are temporarily unavailable.
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -442,94 +420,125 @@ export default function ExplorePage() {
                   <h2 className="text-lg font-semibold text-white">Recent moderation abuse reports</h2>
                 </div>
                 <div className="min-h-[13.5rem] max-h-[13.5rem] space-y-2 overflow-x-hidden overflow-y-auto pr-1">
-                  {(highlights?.moderation || []).slice(0, 14).map((row) => (
-                    <Link
-                      key={row.questionId}
-                      href={`/moderation?q=${encodeURIComponent(row.questionId)}`}
-                      className="block h-[66px] min-w-0 rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 hover:border-white/25"
-                    >
-                      <div className="flex h-full min-w-0 flex-col justify-between">
-                        <div className="flex min-w-0 items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium text-white">{row.agentId || row.questionId.slice(0, 12)}</div>
-                            <div className="truncate text-[10px] text-white/60">{row.question}</div>
-                          </div>
-                          <Badge className={`shrink-0 px-1.5 py-0 text-[10px] ${moderationTone(row.answer)}`}>{row.answer}</Badge>
-                        </div>
-                        <div className="flex min-w-0 items-center justify-between gap-2 text-[10px] text-white/55">
-                          <span className="truncate">{row.questionId.slice(0, 12)}...</span>
-                          <span className="shrink-0">{formatAgo(row.created)}</span>
-                        </div>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            </section>
-
-            <section className="mt-10 sm:mt-12">
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <div ref={searchPanelRef} className="relative flex-1">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/60" />
-                  <input
-                    type="text"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    onFocus={() => setShowSuggestions(true)}
-                    onKeyDown={(e) => (e.key === "Enter" ? onSearch() : null)}
-                    placeholder="Search by name, owner, entity id, or agent id"
-                    className="h-11 w-full rounded-lg border border-white/20 bg-black/30 pl-10 pr-4 text-sm text-white placeholder:text-white/55 focus:border-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-300/20"
-                  />
-                  {showSuggestions && query.trim().length >= 2 ? (
-                    <div className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-40 rounded-lg border border-white/15 bg-[#0b0d14]/95 p-2 shadow-xl backdrop-blur">
-                      {searchingSuggestions ? (
-                        <div className="flex items-center gap-2 px-2 py-3 text-xs text-white/70">
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          Searching agents...
-                        </div>
-                      ) : suggestions.length > 0 ? (
-                        <div className="space-y-1">
-                          {suggestions.map((item) => (
-                            <Link
-                              key={`${item.network}:${item.id}`}
-                              href={`/agents/${encodeURIComponent(item.id)}?network=${item.network}`}
-                              onClick={() => setShowSuggestions(false)}
-                              className="flex items-center gap-2 rounded-md border border-transparent px-2 py-1.5 hover:border-cyan-300/35 hover:bg-white/5"
-                            >
-                              <div className="h-8 w-8 shrink-0 overflow-hidden rounded-md bg-white/5">
-                                {item.image ? (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img src={item.image} alt={item.name} className="h-full w-full object-cover" />
-                                ) : (
-                                  <div className="flex h-full w-full items-center justify-center text-[10px] text-white/65">AI</div>
-                                )}
-                              </div>
-                              <div className="min-w-0">
-                                <div className="truncate text-sm text-white">{item.name}</div>
-                                <div className="truncate text-[11px] text-white/60">
-                                  {item.agentId} | {getAgentSubgraphLabel(item.network)}
-                                </div>
-                              </div>
-                            </Link>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="px-2 py-3 text-xs text-white/65">No matching agents found.</div>
-                      )}
+                  {loading && !highlights ? (
+                    <div className="flex h-full min-h-[13.5rem] items-center justify-center text-xs text-white/65">
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Loading moderation signals...
                     </div>
-                  ) : null}
+                  ) : (highlights?.moderation || []).length > 0 ? (
+                    (highlights?.moderation || []).slice(0, 14).map((row) => (
+                      <Link
+                        key={row.questionId}
+                        href={`/moderation?q=${encodeURIComponent(row.questionId)}`}
+                        className="block h-[66px] min-w-0 rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 hover:border-white/25"
+                      >
+                        <div className="flex h-full min-w-0 flex-col justify-between">
+                          <div className="flex min-w-0 items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium text-white">{row.agentId || row.questionId.slice(0, 12)}</div>
+                              <div className="truncate text-[10px] text-white/60">{row.question}</div>
+                            </div>
+                            <Badge className={`shrink-0 px-1.5 py-0 text-[10px] ${moderationTone(row.answer)}`}>{row.answer}</Badge>
+                          </div>
+                          <div className="flex min-w-0 items-center justify-between gap-2 text-[10px] text-white/55">
+                            <span className="truncate">{row.questionId.slice(0, 12)}...</span>
+                            <span className="shrink-0">{formatAgo(row.created)}</span>
+                          </div>
+                        </div>
+                      </Link>
+                    ))
+                  ) : (
+                    <div className="flex h-full min-h-[13.5rem] items-center justify-center text-xs text-white/65">
+                      No moderation reports available.
+                    </div>
+                  )}
                 </div>
-                <Button className="h-11 border border-cyan-300/40 bg-cyan-300/20 text-white hover:bg-cyan-300/30" onClick={onSearch}>
-                  Search
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-                <Button asChild variant="outline" className="h-11 border-white/20 bg-white/5 text-white hover:bg-white/10">
-                  <Link href="/agents">Open Full Registry</Link>
-                </Button>
               </div>
-            </section>
+          </section>
 
-            <section className="mt-12 space-y-6">
+          <section className="mt-10 sm:mt-12">
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/60" />
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => (e.key === "Enter" ? void runAgentSearch() : null)}
+                  placeholder="Search by name, owner, entity id, or agent id"
+                  className="h-11 w-full rounded-lg border border-white/20 bg-black/30 pl-10 pr-4 text-sm text-white placeholder:text-white/55 focus:border-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-300/20"
+                />
+              </div>
+              <Button
+                className="h-11 border border-cyan-300/40 bg-cyan-300/20 text-white hover:bg-cyan-300/30"
+                onClick={() => void runAgentSearch()}
+                disabled={searchingAgents}
+              >
+                Search
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+              <Button asChild variant="outline" className="h-11 border-white/20 bg-white/5 text-white hover:bg-white/10">
+                <Link href="/agents?network=all">Explore All</Link>
+              </Button>
+            </div>
+            {hasSearchedAgents ? (
+              <div className="mt-5 rounded-xl border border-white/10 bg-black/25 p-3">
+                {searchingAgents ? (
+                  <div className="py-5 text-sm text-white/65">
+                    <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+                    Searching agents...
+                  </div>
+                ) : searchedAgents.length > 0 ? (
+                  <>
+                    <div className="mb-2 flex items-center justify-between text-xs text-white/55">
+                      <span>
+                        Showing {Math.min(8, searchedAgents.length)} of {searchedAgents.length} matches
+                      </span>
+                      {searchedAgents.length > 8 ? <span>Refine query for fewer results</span> : null}
+                    </div>
+                    <div className="max-h-[26rem] space-y-2 overflow-auto pr-1">
+                      {searchedAgents.slice(0, 8).map((agent) => {
+                        const network = getAgentNetworkFromChainId(agent.chainId) || "sepolia";
+                        return (
+                          <div
+                            key={`${network}:${agent.id}`}
+                            className="rounded-lg border border-white/10 bg-black/25 p-3 transition-all hover:border-white/20"
+                          >
+                            <div className="flex items-center justify-between gap-4">
+                              <div className="min-w-0">
+                                <div className="truncate text-base font-semibold text-white">{getDisplayName(agent)}</div>
+                                <div className="mt-1 text-xs text-white/60">
+                                  {agent.agentId} | {getAgentSubgraphLabel(network)}
+                                </div>
+                                {agent.registrationFile?.description ? (
+                                  <div className="mt-1 truncate text-xs text-white/50">
+                                    {agent.registrationFile.description}
+                                  </div>
+                                ) : null}
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <Button asChild size="sm" variant="ghost" className="rounded-lg text-white hover:bg-white/10">
+                                  <Link href={`/agents/${encodeURIComponent(agent.id)}?network=${network}`}>View</Link>
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                ) : (
+                  <div className="py-5 text-sm text-white/60">
+                    {searchError ? searchError : `No agents found matching "${query.trim()}"`}
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </section>
+
+          <section className="mt-12 space-y-6">
+            {stats ? (
+              <>
               <AgentCarousel
                 title="Top Rated"
                 icon={Clock3}
@@ -542,13 +551,21 @@ export default function ExplorePage() {
                 items={(stats?.lists.mostReviewed || []).slice(0, 14)}
                 previewByKey={previewByKey}
               />
-            </section>
-
-            <section className="mt-12">
-              <div className="mb-3 flex items-center gap-2">
-                <Activity className="h-4 w-4 text-cyan-300" />
-                <h2 className="text-lg font-semibold text-white">Recent activity</h2>
+              </>
+            ) : (
+              <div className="flex items-center justify-center rounded-xl border border-white/10 bg-white/5 py-10 text-sm text-white/65">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Loading agent rankings...
               </div>
+            )}
+          </section>
+
+          <section className="mt-12">
+            <div className="mb-3 flex items-center gap-2">
+              <Activity className="h-4 w-4 text-cyan-300" />
+              <h2 className="text-lg font-semibold text-white">Recent activity</h2>
+            </div>
+            {stats ? (
               <div className="grid gap-2 md:grid-cols-2">
                 {activityCards.map((item) => (
                   <Link
@@ -570,9 +587,14 @@ export default function ExplorePage() {
                   </Link>
                 ))}
               </div>
-            </section>
-          </>
-        )}
+            ) : (
+              <div className="flex items-center justify-center rounded-xl border border-white/10 bg-white/5 py-10 text-sm text-white/65">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Loading recent activity...
+              </div>
+            )}
+          </section>
+        </>
       </main>
     </div>
   );

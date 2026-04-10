@@ -10,6 +10,7 @@ import { CollateralizeAgentDialog } from "@/components/pgtcr/collateralize-agent
 import { getAgentSubgraphLabel, isAgentSubgraphNetwork, type AgentSubgraphNetwork } from "@/lib/agent-networks";
 import { getDisplayName } from "@/lib/format";
 import { getAgentNetworkFromChainId, parseChainId } from "@/lib/block-explorer";
+import { loadCurateRegistrationFile } from "@/lib/curate-agent-fallback";
 import { formatEther } from "viem";
 import { useReadContract } from "wagmi";
 import { ERC20_ABI } from "@/lib/abi/erc20";
@@ -29,6 +30,17 @@ type PgtcrItemRow = {
 
 type ItemsApiResponse =
   | { success: true; items: PgtcrItemRow[]; skip: number; first: number }
+  | { success: false; error: string };
+
+type AgentLookupApiResponse =
+  | {
+      success: true;
+      found: boolean;
+      network: AgentSubgraphNetwork | null;
+      requestedNetwork?: AgentSubgraphNetwork | null;
+      agentId: string;
+      item: DisplayAgent | null;
+    }
   | { success: false; error: string };
 
 type AgentPreview = {
@@ -132,6 +144,70 @@ export default function VerifiedAgentsPage() {
     return () => { cancelled = true; };
   }, []);
 
+  React.useEffect(() => {
+    let cancelled = false;
+    async function hydrateFromCurateMetadata() {
+      const targets = (items || [])
+        .map((item) => {
+          const agentId = item.metadata?.key0?.trim() || "";
+          const key2 = item.metadata?.key2 || "";
+          const network = (() => {
+            const chainId = parseChainId(String(key2 || ""));
+            if (!chainId) return "sepolia" as AgentSubgraphNetwork;
+            return getAgentNetworkFromChainId(chainId) || ("sepolia" as AgentSubgraphNetwork);
+          })();
+
+          return {
+            key: `${network}:${agentId}`,
+            agentId,
+            network,
+            uri: item.metadata?.key1 || null,
+          };
+        })
+        .filter((item) => item.agentId);
+
+      if (!targets.length) return;
+
+      const updates = await Promise.all(
+        targets.map(async (target) => {
+          const registrationFile = await loadCurateRegistrationFile(target.uri);
+          return [
+            target.key,
+            {
+              id: target.agentId,
+              agentId: target.agentId,
+              name: registrationFile?.name || `Agent #${target.agentId}`,
+              image: registrationFile?.image || null,
+              network: target.network,
+              resolved: false,
+            } satisfies AgentPreview,
+          ] as const;
+        })
+      );
+
+      if (cancelled) return;
+      setPreviewByKey((prev) => {
+        const next = { ...prev };
+        for (const [key, value] of updates) {
+          const existing = next[key];
+          if (existing?.resolved) continue;
+          next[key] = {
+            ...existing,
+            ...value,
+            image: existing?.image || value.image || null,
+            resolved: existing?.resolved || value.resolved,
+          };
+        }
+        return next;
+      });
+    }
+
+    void hydrateFromCurateMetadata();
+    return () => {
+      cancelled = true;
+    };
+  }, [items]);
+
   const tokenSymbol = useReadContract({
     address: (pgtcrToken ?? undefined) as `0x${string}` | undefined,
     abi: ERC20_ABI,
@@ -206,18 +282,29 @@ export default function VerifiedAgentsPage() {
               `/api/agents/by-agent-id?agentId=${encodeURIComponent(r.agentId)}&network=${encodeURIComponent(r.network)}`,
               { cache: "no-store" }
             );
-            const json = await res.json();
-            const agent = (json?.agent || json?.item) as DisplayAgent | null;
+            const json = (await res.json()) as AgentLookupApiResponse;
+            const agent = json.success ? json.item : null;
+            const resolvedNetwork =
+              json.success && json.found && json.network && isAgentSubgraphNetwork(json.network)
+                ? json.network
+                : r.network;
             const name = agent ? getDisplayName(agent) : `Agent ${r.agentId}`;
             const image = agent?.registrationFile?.image || null;
             return [
               `${r.network}:${r.agentId}`,
-              { id: agent?.id || r.agentId, agentId: r.agentId, name, image, network: r.network, resolved: Boolean(agent) },
+              {
+                id: agent?.id || r.agentId,
+                agentId: agent?.agentId || r.agentId,
+                name,
+                image,
+                network: resolvedNetwork,
+                resolved: Boolean(agent),
+              },
             ] as const;
           } catch {
             return [
               `${r.network}:${r.agentId}`,
-              { id: r.agentId, agentId: r.agentId, name: `Curate item fallback`, image: null, network: r.network, resolved: false },
+              { id: r.agentId, agentId: r.agentId, name: `Agent #${r.agentId}`, image: null, network: r.network, resolved: false },
             ] as const;
           }
         })
@@ -226,7 +313,14 @@ export default function VerifiedAgentsPage() {
       if (cancelled) return;
       setPreviewByKey((prev) => {
         const next = { ...prev };
-        for (const [k, v] of updates) next[k] = v;
+        for (const [k, v] of updates) {
+          const existing = next[k];
+          if (existing?.resolved && !v.resolved) continue;
+          next[k] = {
+            ...v,
+            image: v.image || existing?.image || null,
+          };
+        }
         return next;
       });
     }
@@ -322,10 +416,12 @@ export default function VerifiedAgentsPage() {
             const preview = previewByKey[key];
             const name = preview?.name || `Agent ${key0 || item.itemID.slice(0, 10)}`;
             const isResolved = preview?.resolved ?? false;
-            const curateItemUrl = `/submissions/${encodeURIComponent(item.itemID)}`;
-            const href = key0 && isResolved
-              ? `/agents/${encodeURIComponent(key0)}?network=${network}&lookup=agentId`
-              : curateItemUrl;
+            const resolvedNetwork = preview?.network || network;
+            const useAgentIdLookup = !preview?.id || !isResolved || preview.id === preview.agentId || preview.id === key0;
+            const targetId = useAgentIdLookup ? (preview?.agentId || key0) : preview.id;
+            const href = targetId
+              ? `/agents/${encodeURIComponent(targetId)}?network=${resolvedNetwork}${useAgentIdLookup ? "&lookup=agentId" : ""}`
+              : `/submissions/${encodeURIComponent(item.itemID)}`;
 
             const cardContent = (
               <>
@@ -343,10 +439,10 @@ export default function VerifiedAgentsPage() {
                     Collateral {formatCollateral(collateral)} {tokenSymbol || ""}
                   </div>
                   <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span className="max-w-full truncate font-mono">{key0 || "-"}</span>
+                    <span className="max-w-full truncate font-mono">{preview?.agentId || key0 || "-"}</span>
                     {!isResolved ? <span className="shrink-0 text-amber-300">agent not found</span> : null}
                     <span className="shrink-0">|</span>
-                    <span className="truncate">{getAgentSubgraphLabel(network)}</span>
+                    <span className="truncate">{getAgentSubgraphLabel(resolvedNetwork)}</span>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <Badge className={statusTone(status)}>{status.toUpperCase()}</Badge>

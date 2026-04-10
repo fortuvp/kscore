@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { getAgentByAgentId } from "@/lib/subgraph.handler";
 import {
+  AGENT_SUBGRAPH_NETWORKS,
   AGENT_NETWORK_CHAIN_IDS,
   isAgentSubgraphNetwork,
   type AgentSubgraphNetwork,
 } from "@/lib/agent-networks";
+import { getCurateFallbackAgentByAgentId } from "@/lib/curate-agent-fallback.server";
+
+const SUBGRAPH_LOOKUP_TIMEOUT_MS = 2500;
 
 function buildAgentIdCandidates(agentIdParam: string, network: AgentSubgraphNetwork): string[] {
   const trimmed = agentIdParam.trim();
@@ -23,13 +27,53 @@ function buildAgentIdCandidates(agentIdParam: string, network: AgentSubgraphNetw
   return Array.from(candidates);
 }
 
+function getNetworkSearchOrder(
+  requestedNetwork: AgentSubgraphNetwork | null
+): AgentSubgraphNetwork[] {
+  if (!requestedNetwork) return [...AGENT_SUBGRAPH_NETWORKS];
+  return [requestedNetwork];
+}
+
+async function resolveAgentByAgentId(
+  agentIdParam: string,
+  requestedNetwork: AgentSubgraphNetwork | null
+) {
+  const checked: Array<{ network: AgentSubgraphNetwork; agentId: string }> = [];
+  const seen = new Set<string>();
+
+  for (const network of getNetworkSearchOrder(requestedNetwork)) {
+    for (const candidate of buildAgentIdCandidates(agentIdParam, network)) {
+      const key = `${network}:${candidate}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      checked.push({ network, agentId: candidate });
+
+      try {
+        const agent = await Promise.race([
+          getAgentByAgentId(candidate, network),
+          new Promise<null>((resolve) => {
+            setTimeout(() => resolve(null), SUBGRAPH_LOOKUP_TIMEOUT_MS);
+          }),
+        ]);
+        if (agent) {
+          return { agent, network, agentId: candidate, checked };
+        }
+      } catch {
+        // Keep scanning other configured networks instead of failing the whole lookup.
+      }
+    }
+  }
+
+  return { agent: null, network: null, agentId: agentIdParam, checked };
+}
+
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const agentIdParam = url.searchParams.get("agentId")?.trim();
     const rawNetwork = url.searchParams.get("network");
 
-    let network: AgentSubgraphNetwork = "sepolia";
+    let requestedNetwork: AgentSubgraphNetwork | null = null;
     if (rawNetwork) {
       if (!isAgentSubgraphNetwork(rawNetwork)) {
         return NextResponse.json(
@@ -37,7 +81,7 @@ export async function GET(req: Request) {
           { status: 400 }
         );
       }
-      network = rawNetwork;
+      requestedNetwork = rawNetwork;
     }
 
     if (!agentIdParam) {
@@ -47,28 +91,41 @@ export async function GET(req: Request) {
       );
     }
 
-    const candidates = buildAgentIdCandidates(agentIdParam, network);
+    const [resolved, curateFallback] = await Promise.all([
+      resolveAgentByAgentId(agentIdParam, requestedNetwork),
+      getCurateFallbackAgentByAgentId(agentIdParam, requestedNetwork),
+    ]);
 
-    for (const candidate of candidates) {
-      const agent = await getAgentByAgentId(candidate, network);
-      if (agent) {
-        return NextResponse.json({
-          success: true,
-          found: true,
-          network,
-          agentId: candidate,
-          item: agent,
-        });
-      }
+    if (resolved.agent && resolved.network) {
+      return NextResponse.json({
+        success: true,
+        found: true,
+        network: resolved.network,
+        requestedNetwork,
+        agentId: resolved.agentId,
+        item: resolved.agent,
+      });
+    }
+
+    if (curateFallback?.agent && curateFallback.network) {
+      return NextResponse.json({
+        success: true,
+        found: true,
+        network: curateFallback.network,
+        requestedNetwork,
+        agentId: curateFallback.agent.agentId,
+        item: curateFallback.agent,
+      });
     }
 
     return NextResponse.json({
       success: true,
       found: false,
-      network,
+      network: requestedNetwork,
+      requestedNetwork,
       agentId: agentIdParam,
       item: null,
-      checked: candidates,
+      checked: resolved.checked,
     });
   } catch (e) {
     return NextResponse.json(

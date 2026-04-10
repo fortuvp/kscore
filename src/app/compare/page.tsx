@@ -32,6 +32,8 @@ type CollateralizedStatus = "yes" | "no" | "unknown";
 
 type SearchMode = "auto" | "name" | "agentId" | "owner" | "entityId";
 
+const SEARCH_REQUEST_TIMEOUT_MS = 1800;
+
 function looksLikeAddress(value: string): boolean {
   return /^0x[a-fA-F0-9]{40}$/.test(value.trim());
 }
@@ -76,21 +78,25 @@ async function searchAcrossNetworks(query: string, mode: SearchMode = "auto") {
   const trimmed = query.trim();
   if (!trimmed) return [] as ComparePick[];
   const effectiveMode = resolveSearchMode(mode, trimmed);
+  const controllers = AGENT_SUBGRAPH_NETWORKS.map(() => new AbortController());
+  const timeouts = controllers.map((controller) =>
+    window.setTimeout(() => controller.abort(), SEARCH_REQUEST_TIMEOUT_MS)
+  );
 
-  const groups = await Promise.all(
-    AGENT_SUBGRAPH_NETWORKS.map(async (network) => {
+  const groups = await Promise.allSettled(
+    AGENT_SUBGRAPH_NETWORKS.map(async (network, index) => {
       const toPicks = (items: Agent[]) =>
         items.map((item) => ({
-        id: item.id,
-        network,
-        name: getDisplayName(item),
-        owner: item.owner,
-      }));
+          id: item.id,
+          network,
+          name: getDisplayName(item),
+          owner: item.owner,
+        }));
 
       if (effectiveMode === "owner") {
         const res = await fetch(
           `/api/agents/by-owner?owner=${encodeURIComponent(trimmed)}&network=${encodeURIComponent(network)}&first=20&skip=0`,
-          { cache: "no-store" }
+          { cache: "no-store", signal: controllers[index].signal }
         );
         if (!res.ok) return [] as ComparePick[];
         const json = await res.json();
@@ -100,7 +106,7 @@ async function searchAcrossNetworks(query: string, mode: SearchMode = "auto") {
       if (effectiveMode === "agentId") {
         const res = await fetch(
           `/api/agents/by-agent-id?agentId=${encodeURIComponent(trimmed)}&network=${encodeURIComponent(network)}`,
-          { cache: "no-store" }
+          { cache: "no-store", signal: controllers[index].signal }
         );
         if (!res.ok) return [] as ComparePick[];
         const json = await res.json();
@@ -110,7 +116,7 @@ async function searchAcrossNetworks(query: string, mode: SearchMode = "auto") {
       if (effectiveMode === "entityId") {
         const res = await fetch(
           `/api/agents/${encodeURIComponent(trimmed)}?network=${encodeURIComponent(network)}`,
-          { cache: "no-store" }
+          { cache: "no-store", signal: controllers[index].signal }
         );
         if (!res.ok) return [] as ComparePick[];
         const json = await res.json();
@@ -119,7 +125,7 @@ async function searchAcrossNetworks(query: string, mode: SearchMode = "auto") {
 
       const res = await fetch(
         `/api/agents?q=${encodeURIComponent(trimmed)}&network=${encodeURIComponent(network)}&pageSize=8`,
-        { cache: "no-store" }
+        { cache: "no-store", signal: controllers[index].signal }
       );
       if (!res.ok) return [] as ComparePick[];
       const json = await res.json();
@@ -127,9 +133,12 @@ async function searchAcrossNetworks(query: string, mode: SearchMode = "auto") {
     })
   );
 
+  for (const timeout of timeouts) window.clearTimeout(timeout);
+
   const unique = new Map<string, ComparePick>();
   for (const group of groups) {
-    for (const item of group) {
+    if (group.status !== "fulfilled") continue;
+    for (const item of group.value) {
       unique.set(`${item.network}:${item.id}`, item);
     }
   }
