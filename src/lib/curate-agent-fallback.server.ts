@@ -276,3 +276,15 @@ export async function listCurateFallbackAgents(params: {
     return [] as AgentWithDetails[];
   }
 }
+
+export async function getAcceptedCurateAgentIds(network?: AgentSubgraphNetwork | null) {
+  try {
+    const items = await getRecentAcceptedCurateItems();
+    return items
+      .filter((item) => matchesNetwork(item, network))
+      .map((item) => item.metadata?.key0?.trim() || "")
+      .filter((agentId): agentId is string => Boolean(agentId));
+  } catch {
+    return [] as string[];
+  }
+}

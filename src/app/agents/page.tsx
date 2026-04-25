@@ -104,29 +104,25 @@ function AgentsContent() {
         setIsLoading(true);
         const searchTerm = query !== undefined ? query : searchQuery;
         const isReportWideFetch = reportFilter !== "all";
-        const isCollateralWideFetch = collateralFilter !== "all";
-        const requestedPage = isReportWideFetch || isCollateralWideFetch ? 1 : page;
-        const requestedPageSize = isReportWideFetch || isCollateralWideFetch ? "300" : perPage;
-        const requestNetwork =
-            network === "all" && collateralFilter === "collateralized"
-                ? "sepolia"
-                : network;
+        const requestedPage = isReportWideFetch ? 1 : page;
+        const requestedPageSize = isReportWideFetch ? "300" : perPage;
         try {
             const params = new URLSearchParams({
                 page: requestedPage.toString(),
                 pageSize: requestedPageSize,
                 sort: sortBy,
             });
-            params.set("network", requestNetwork);
+            params.set("network", network);
             if (searchTerm) params.set("q", searchTerm);
             if (protocolFilter !== "all") params.set("protocol", protocolFilter);
+            if (collateralFilter !== "all") params.set("collateralFilter", collateralFilter);
 
             const response = await fetch(`/api/agents?${params}`);
             const data = await response.json();
 
             if (data.success) {
                 setAgents(data.items);
-                setHasMore(isReportWideFetch || isCollateralWideFetch ? false : data.hasMore);
+                setHasMore(isReportWideFetch ? false : data.hasMore);
                 setCurrentPage(requestedPage);
             }
         } catch (error) {
@@ -195,11 +191,8 @@ function AgentsContent() {
 
     const filteredAgents = agents.filter((agent) => {
         const key = `${resolveAgentNetwork(agent)}:${agent.agentId.toLowerCase()}`;
-        const trust = trustByKey[key];
         const reported = reportedByKey[key] || false;
 
-        if (collateralFilter === "collateralized" && trust?.collateralized !== true) return false;
-        if (collateralFilter === "notCollateralized" && trust?.collateralized !== false) return false;
         if (reportFilter === "reported" && !reported) return false;
         if (reportFilter === "nonReported" && reported) return false;
 

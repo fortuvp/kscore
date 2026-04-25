@@ -7,6 +7,7 @@ import {
   type AgentSubgraphNetwork,
 } from "@/lib/agent-networks";
 import { getCurateFallbackAgentByAgentId } from "@/lib/curate-agent-fallback.server";
+import { getSepoliaIdentityRegistryFallbackAgentByAgentId } from "@/lib/identity-registry-fallback.server";
 import type { AgentWithDetails } from "@/types/agent";
 
 const SUBGRAPH_LOOKUP_TIMEOUT_MS = 6000;
@@ -101,9 +102,12 @@ export async function GET(req: Request) {
       );
     }
 
-    const [resolved, curateFallback] = await Promise.all([
+    const [resolved, curateFallback, sepoliaFallback] = await Promise.all([
       resolveAgentByAgentId(agentIdParam, requestedNetwork),
       getCurateFallbackAgentByAgentId(agentIdParam, requestedNetwork),
+      requestedNetwork && requestedNetwork !== "sepolia"
+        ? Promise.resolve(null)
+        : getSepoliaIdentityRegistryFallbackAgentByAgentId(agentIdParam),
     ]);
 
     const bestResolvedAgent =
@@ -138,6 +142,17 @@ export async function GET(req: Request) {
         requestedNetwork,
         agentId: curateFallback.agent.agentId,
         item: curateFallback.agent,
+      });
+    }
+
+    if (sepoliaFallback) {
+      return NextResponse.json({
+        success: true,
+        found: true,
+        network: "sepolia",
+        requestedNetwork,
+        agentId: sepoliaFallback.agentId,
+        item: sepoliaFallback,
       });
     }
 

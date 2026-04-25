@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAgentByAgentId, getAgentWithFeedback } from "@/lib/subgraph.handler";
 import { isAgentSubgraphNetwork, type AgentSubgraphNetwork } from "@/lib/agent-networks";
 import { getCurateFallbackAgentByAgentId } from "@/lib/curate-agent-fallback.server";
+import { getSepoliaIdentityRegistryFallbackAgentByAgentId } from "@/lib/identity-registry-fallback.server";
 
 const AGENT_DETAIL_TIMEOUT_MS = 8000;
 
@@ -45,6 +46,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
                 // Numeric fallback should not fail the whole request when the subgraph is unhealthy.
             }
 
+            if (network === "sepolia") {
+                const onchainFallback = await getSepoliaIdentityRegistryFallbackAgentByAgentId(fallbackAgentId);
+                if (onchainFallback) {
+                    return NextResponse.json({ success: true, agent: onchainFallback, network });
+                }
+            }
+
             return NextResponse.json({ success: false, error: "Agent not found" }, { status: 404 });
         }
 
@@ -69,6 +77,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
                 const fallbackAgent = await getAgentByAgentId(fallbackAgentId, network, 10, true);
                 if (fallbackAgent) {
                     return NextResponse.json({ success: true, agent: fallbackAgent, network });
+                }
+                if (network === "sepolia") {
+                    const onchainFallback = await getSepoliaIdentityRegistryFallbackAgentByAgentId(fallbackAgentId);
+                    if (onchainFallback) {
+                        return NextResponse.json({ success: true, agent: onchainFallback, network });
+                    }
                 }
             }
             return NextResponse.json({ success: false, error: "Agent not found" }, { status: 404 });
