@@ -41,6 +41,8 @@ import { doesQuestionMatchAgent } from "@/lib/reality/question-match";
 import { getAgentChainLabel, isAgentSubgraphNetwork } from "@/lib/agent-networks";
 import { getAddressExplorerUrl, getAddressExplorerUrlForNetwork, getTxExplorerUrl, getTxExplorerUrlForNetwork, truncateHash } from "@/lib/block-explorer";
 import { ipfsToGatewayUrl } from "@/lib/ipfs";
+import type { PgtcrItemWithChallengesAndEvidence } from "@/lib/pgtcr-subgraph";
+import { getPgtcrRemovalReason, getResolvedChallengeOutcomeForDisplay } from "@/lib/pgtcr-status";
 
 type Tab = "overview" | "metadata";
 
@@ -91,21 +93,23 @@ export default function AgentDetailPage() {
     const [flaggedReports, setFlaggedReports] = useState<AbuseFlag[]>([]);
     const [curateItemId, setCurateItemId] = useState<string | null>(null);
     const [pgtcrRegistryAddress, setPgtcrRegistryAddress] = useState<`0x${string}` | null>(null);
-    const [pgtcrItem, setPgtcrItem] = useState<{
-        status?: string;
-        itemID?: string;
-        submitter?: string;
-        includedAt?: string;
-        stake?: string;
-        withdrawingTimestamp?: string;
-        challenges?: Array<{ createdAt?: string; resolutionTime?: string | null; challenger?: string; disputeID?: string }>;
-        evidences?: Array<{ timestamp?: string; txHash?: string; party?: string }>;
-    } | null>(null);
+    const [pgtcrWithdrawingPeriodSec, setPgtcrWithdrawingPeriodSec] = useState<number | null>(null);
+    const [pgtcrItem, setPgtcrItem] = useState<PgtcrItemWithChallengesAndEvidence | null>(null);
     const [historyTx, setHistoryTx] = useState<{ createdTxHash: string | null; updatedTxHash: string | null } | null>(null);
+    const [curateHistoryTx, setCurateHistoryTx] = useState<{
+        withdrawStartedTxHash: string | null;
+        withdrawStartedAt: number | null;
+        withdrawExecutedTxHash: string | null;
+        withdrawExecutedAt: number | null;
+    } | null>(null);
 
     const offers = useOffersForAgent(agent?.agentId ? String(agent.agentId) : "");
     const realityQuestions = useRealityQuestions();
     const flagged = agent?.agentId ? isAgentFlagged(String(agent.agentId)) : false;
+    const agentOwner = agent?.owner;
+    const agentChainId = agent?.chainId;
+    const agentCreatedAt = agent?.createdAt;
+    const agentUpdatedAt = agent?.updatedAt;
 
     useEffect(() => {
         async function fetchAgent() {
@@ -192,6 +196,7 @@ export default function AgentDetailPage() {
         if (!agent?.agentId) {
             setCurateItemId(null);
             setPgtcrRegistryAddress(null);
+            setPgtcrWithdrawingPeriodSec(null);
             setPgtcrItem(null);
             return;
         }
@@ -203,13 +208,16 @@ export default function AgentDetailPage() {
                     fetch("/api/pgtcr/registry", { cache: "no-store" }),
                     fetch(`/api/kleros/verification?agentId=${encodeURIComponent(agentId)}&network=${network}`, { cache: "no-store" }),
                 ]);
-                const regJson = (await regRes.json()) as { success: boolean; registry?: { id: string }; error?: string };
+                const regJson = (await regRes.json()) as { success: boolean; registry?: { id: string; withdrawingPeriod?: string | number | null }; error?: string };
                 const verJson = (await verRes.json()) as { success: boolean; itemID?: string | null; error?: string };
                 if (cancelled) return;
                 if (regJson.success && regJson.registry?.id) {
                     setPgtcrRegistryAddress(regJson.registry.id as `0x${string}`);
+                    const withdrawingPeriod = Number(regJson.registry.withdrawingPeriod ?? NaN);
+                    setPgtcrWithdrawingPeriodSec(Number.isFinite(withdrawingPeriod) && withdrawingPeriod >= 0 ? withdrawingPeriod : null);
                 } else {
                     setPgtcrRegistryAddress(null);
+                    setPgtcrWithdrawingPeriodSec(null);
                 }
                 if (verJson.success && verJson.itemID) {
                     setCurateItemId(verJson.itemID);
@@ -233,6 +241,7 @@ export default function AgentDetailPage() {
             } catch {
                 if (!cancelled) {
                     setPgtcrRegistryAddress(null);
+                    setPgtcrWithdrawingPeriodSec(null);
                     setCurateItemId(null);
                     setPgtcrItem(null);
                 }
@@ -255,20 +264,19 @@ export default function AgentDetailPage() {
     }, [agent?.agentId]);
 
     useEffect(() => {
-        if (!agent?.owner || !agent?.chainId || !agent?.createdAt) {
+        if (!agentOwner || !agentChainId || !agentCreatedAt) {
             setHistoryTx(null);
             return;
         }
-        const currentAgent = agent;
 
         let cancelled = false;
         async function loadHistoryTx() {
             try {
                 const params = new URLSearchParams({
-                    chainId: String(currentAgent.chainId),
-                    owner: String(currentAgent.owner),
-                    createdAt: String(currentAgent.createdAt),
-                    updatedAt: String(currentAgent.updatedAt || currentAgent.createdAt),
+                    chainId: String(agentChainId),
+                    owner: String(agentOwner),
+                    createdAt: String(agentCreatedAt),
+                    updatedAt: String(agentUpdatedAt || agentCreatedAt),
                 });
                 const res = await fetch(`/api/agents/history-tx?${params.toString()}`, { cache: "no-store" });
                 const json = await res.json();
@@ -290,7 +298,47 @@ export default function AgentDetailPage() {
         return () => {
             cancelled = true;
         };
-    }, [agent?.owner, agent?.chainId, agent?.createdAt, agent?.updatedAt]);
+    }, [agentChainId, agentCreatedAt, agentOwner, agentUpdatedAt]);
+
+    useEffect(() => {
+        const itemId = pgtcrItem?.itemID?.trim();
+        const withdrawStartedAt = Number(pgtcrItem?.withdrawingTimestamp || "0");
+
+        if (!itemId || !Number.isFinite(withdrawStartedAt) || withdrawStartedAt <= 0) {
+            setCurateHistoryTx(null);
+            return;
+        }
+
+        let cancelled = false;
+        async function loadCurateHistoryTx() {
+            try {
+                const params = new URLSearchParams({
+                    itemID: itemId || "",
+                    withdrawStartedAt: String(withdrawStartedAt),
+                });
+                const res = await fetch(`/api/pgtcr/history-tx?${params.toString()}`, { cache: "no-store" });
+                const json = await res.json();
+                if (cancelled) return;
+                if (json?.success) {
+                    setCurateHistoryTx({
+                        withdrawStartedTxHash: json.withdrawStartedTxHash || null,
+                        withdrawStartedAt: Number.isFinite(Number(json.withdrawStartedAt)) ? Number(json.withdrawStartedAt) : null,
+                        withdrawExecutedTxHash: json.withdrawExecutedTxHash || null,
+                        withdrawExecutedAt: Number.isFinite(Number(json.withdrawExecutedAt)) ? Number(json.withdrawExecutedAt) : null,
+                    });
+                } else {
+                    setCurateHistoryTx(null);
+                }
+            } catch {
+                if (!cancelled) setCurateHistoryTx(null);
+            }
+        }
+
+        void loadCurateHistoryTx();
+        return () => {
+            cancelled = true;
+        };
+    }, [pgtcrItem?.itemID, pgtcrItem?.withdrawingTimestamp]);
 
     const copyToClipboard = async (text: string, label?: string) => {
         const value = text?.trim();
@@ -388,13 +436,28 @@ export default function AgentDetailPage() {
         historyTx?.updatedTxHash && getTxExplorerUrl(historyTx.updatedTxHash, agent.chainId)
             ? getTxExplorerUrl(historyTx.updatedTxHash, agent.chainId)
             : null;
+    const curateWithdrawStartedTxUrl =
+        curateHistoryTx?.withdrawStartedTxHash
+            ? getTxExplorerUrlForNetwork(curateHistoryTx.withdrawStartedTxHash, "sepolia")
+            : null;
+    const curateWithdrawExecutedTxUrl =
+        curateHistoryTx?.withdrawExecutedTxHash
+            ? getTxExplorerUrlForNetwork(curateHistoryTx.withdrawExecutedTxHash, "sepolia")
+            : null;
+    const pgtcrRemovalReason = getPgtcrRemovalReason(pgtcrItem);
+    const inferredWithdrawalExecutedAt =
+        pgtcrRemovalReason === "withdrawn" &&
+        Number(pgtcrItem?.withdrawingTimestamp || "0") > 0 &&
+        pgtcrWithdrawingPeriodSec !== null
+            ? Number(pgtcrItem?.withdrawingTimestamp || "0") + pgtcrWithdrawingPeriodSec
+            : null;
 
     const timeline: Array<{
         ts: number;
         badge: string;
         title: string;
         detail: string;
-        tone: "neutral" | "good" | "warn";
+        tone: "neutral" | "good" | "warn" | "bad";
         actor?: string;
         txHash?: string;
         href?: string;
@@ -404,7 +467,7 @@ export default function AgentDetailPage() {
         badge: string,
         title: string,
         detail: string,
-        tone: "neutral" | "good" | "warn" = "neutral",
+        tone: "neutral" | "good" | "warn" | "bad" = "neutral",
         extra?: { actor?: string; txHash?: string; href?: string }
     ) => {
         const ts = Number(tsRaw);
@@ -443,17 +506,59 @@ export default function AgentDetailPage() {
     }
     if (pgtcrItem?.withdrawingTimestamp && Number(pgtcrItem.withdrawingTimestamp) > 0) {
         pushEvent(
-            pgtcrItem.withdrawingTimestamp,
+            curateHistoryTx?.withdrawStartedAt || pgtcrItem.withdrawingTimestamp,
             "Withdrawing",
             "Withdraw initiated",
             "Owner started withdrawal. Item stays registered until the withdrawal period ends.",
             "warn",
-            { actor: pgtcrItem.submitter, href: curateItemId && pgtcrRegistryAddress ? `https://curate.kleros.io/tcr/11155111/${pgtcrRegistryAddress}/${curateItemId}` : undefined }
+            {
+                actor: pgtcrItem.submitter,
+                txHash: curateHistoryTx?.withdrawStartedTxHash || undefined,
+                href:
+                    curateWithdrawStartedTxUrl ||
+                    (curateItemId && pgtcrRegistryAddress
+                        ? `https://curate.kleros.io/tcr/11155111/${pgtcrRegistryAddress}/${curateItemId}`
+                        : undefined),
+            }
+        );
+    }
+    if (pgtcrRemovalReason === "withdrawn" && curateHistoryTx?.withdrawExecutedAt) {
+        pushEvent(
+            curateHistoryTx.withdrawExecutedAt,
+            "Withdrawn",
+            "Withdrawal executed",
+            "Withdrawal completed and the submission is no longer collateralized in Curate.",
+            "warn",
+            {
+                actor: pgtcrItem?.submitter,
+                txHash: curateHistoryTx.withdrawExecutedTxHash || undefined,
+                href: curateWithdrawExecutedTxUrl || undefined,
+            }
+        );
+    } else if (pgtcrRemovalReason === "withdrawn" && inferredWithdrawalExecutedAt) {
+        pushEvent(
+            inferredWithdrawalExecutedAt,
+            "Withdrawn",
+            "Withdrawal executed",
+            "Withdrawal completed and the submission is no longer collateralized in Curate.",
+            "warn",
+            {
+                actor: pgtcrItem?.submitter,
+                txHash: curateHistoryTx?.withdrawExecutedTxHash || undefined,
+                href:
+                    curateWithdrawExecutedTxUrl ||
+                    (curateItemId && pgtcrRegistryAddress
+                        ? `https://curate.kleros.io/tcr/11155111/${pgtcrRegistryAddress}/${curateItemId}`
+                        : undefined),
+            }
         );
     }
 
     (pgtcrItem?.challenges || []).forEach((challenge, index) => {
         const n = (pgtcrItem?.challenges?.length || 0) - index;
+        const disputeHref = challenge.disputeID
+            ? `https://klerosboard.com/#!/dispute/11155111/${challenge.disputeID}`
+            : undefined;
         pushEvent(
             challenge.createdAt,
             "Challenge",
@@ -462,11 +567,43 @@ export default function AgentDetailPage() {
             "warn",
             {
                 actor: challenge.challenger,
-                href: challenge.disputeID ? `https://klerosboard.com/#!/dispute/11155111/${challenge.disputeID}` : undefined,
+                href: disputeHref,
             }
         );
         if (challenge.resolutionTime) {
-            pushEvent(challenge.resolutionTime, "Resolved", `Curate challenge #${n} resolved`, "Dispute resolution recorded", "good");
+            const outcome = getResolvedChallengeOutcomeForDisplay({
+                challenge,
+                item: pgtcrItem,
+                challengeIndex: index,
+            });
+            if (outcome === "challenger") {
+                pushEvent(
+                    challenge.resolutionTime,
+                    "Ruled Against",
+                    `Curate challenge #${n} lost`,
+                    "The submitter lost the dispute and the deposit was forfeited.",
+                    "bad",
+                    { href: disputeHref }
+                );
+            } else if (outcome === "requester") {
+                pushEvent(
+                    challenge.resolutionTime,
+                    "Ruled In Favor",
+                    `Curate challenge #${n} won`,
+                    "The submitter won the dispute. The deposit stayed locked and the listing's economic backing increased.",
+                    "good",
+                    { href: disputeHref }
+                );
+            } else {
+                pushEvent(
+                    challenge.resolutionTime,
+                    "Resolved",
+                    `Curate challenge #${n} resolved`,
+                    "Dispute resolution recorded.",
+                    "neutral",
+                    { href: disputeHref }
+                );
+            }
         }
     });
     (pgtcrItem?.evidences || []).forEach((evidence, index) => {
@@ -480,11 +617,13 @@ export default function AgentDetailPage() {
     pushEvent(agent.lastActivity, "Update", "Last observed activity", "Latest feedback/validation activity");
     timeline.sort((a, b) => b.ts - a.ts);
 
-    const badgeClass = (tone: "neutral" | "good" | "warn") =>
+    const badgeClass = (tone: "neutral" | "good" | "warn" | "bad") =>
         tone === "good"
             ? "border-emerald-400/40 bg-emerald-400/20 text-emerald-200 shadow-[0_0_7px_rgba(16,185,129,0.25)]"
+            : tone === "bad"
+              ? "border-red-400/40 bg-red-400/20 text-red-100 shadow-[0_0_7px_rgba(248,113,113,0.24)]"
             : tone === "warn"
-              ? "border-amber-400/40 bg-amber-400/20 text-amber-100 shadow-[0_0_7px_rgba(251,191,36,0.24)]"
+              ? "border-orange-400/40 bg-orange-400/20 text-orange-100 shadow-[0_0_7px_rgba(251,146,60,0.24)]"
               : "border-cyan-400/40 bg-cyan-400/20 text-cyan-100 shadow-[0_0_7px_rgba(34,211,238,0.22)]";
 
     return (
@@ -508,6 +647,7 @@ export default function AgentDetailPage() {
                     <div className="flex flex-col gap-4 sm:flex-row sm:gap-6">
                         <div className="mx-auto h-24 w-24 overflow-hidden rounded-lg bg-muted sm:mx-0">
                             {agent.registrationFile?.image ? (
+                                // eslint-disable-next-line @next/next/no-img-element
                                 <img
                                     src={agent.registrationFile.image}
                                     alt={getDisplayName(agent)}
@@ -634,8 +774,10 @@ export default function AgentDetailPage() {
                                                     <div className="mt-1 flex flex-col items-center">
                                                         {event.tone === "good" ? (
                                                             <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                                                        ) : event.tone === "bad" ? (
+                                                            <ShieldAlert className="h-4 w-4 text-red-300" />
                                                         ) : event.tone === "warn" ? (
-                                                            <ShieldAlert className="h-4 w-4 text-amber-300" />
+                                                            <ShieldAlert className="h-4 w-4 text-orange-300" />
                                                         ) : (
                                                             <Shield className="h-4 w-4 text-cyan-300" />
                                                         )}

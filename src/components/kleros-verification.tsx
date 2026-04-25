@@ -19,6 +19,8 @@ import { CurateLinkButton } from "@/components/pgtcr/curate-link-button";
 import { ERC20_ABI } from "@/lib/abi/erc20";
 import PermanentGTCRAbi from "@/lib/abi/PermanentGTCR.json";
 import type { AgentSubgraphNetwork } from "@/lib/agent-networks";
+import type { PgtcrItemWithChallengesAndEvidence } from "@/lib/pgtcr-subgraph";
+import { getPgtcrRemovalReason } from "@/lib/pgtcr-status";
 
 type VerificationResponse =
     | {
@@ -36,7 +38,7 @@ type VerificationResponse =
     | { success: false; error: string };
 
 type PgtcrItemApiResponse =
-    | { success: true; item: { stake: string; arbitrationDeposit: string; submitter?: string | null; status?: string; withdrawingTimestamp?: string } | null }
+    | { success: true; item: PgtcrItemWithChallengesAndEvidence | null }
     | { success: false; error: string };
 
 type PgtcrRegistryApiResponse =
@@ -151,8 +153,14 @@ export function KlerosCurateVerification(props: {
 
     const submitter = pgtcrItem && pgtcrItem.success && pgtcrItem.item?.submitter ? pgtcrItem.item.submitter : null;
     const itemStatus = pgtcrItem && pgtcrItem.success ? (pgtcrItem.item?.status || null) : null;
+    const effectiveStatus = itemStatus || (data?.success ? data.status : null);
     const withdrawingTimestampStr = pgtcrItem && pgtcrItem.success ? (pgtcrItem.item?.withdrawingTimestamp || "0") : "0";
     const withdrawingTimestamp = Number(withdrawingTimestampStr || "0");
+    const removalReason = getPgtcrRemovalReason({
+        status: effectiveStatus,
+        withdrawingTimestamp: withdrawingTimestampStr,
+        challenges: pgtcrItem && pgtcrItem.success ? pgtcrItem.item?.challenges : undefined,
+    });
 
     const withdrawingPeriod = useReadContract({
         address: (pgtcrRegistryAddress ?? undefined) as `0x${string}` | undefined,
@@ -178,9 +186,9 @@ export function KlerosCurateVerification(props: {
         submitter &&
         address &&
         submitter.toLowerCase() === address.toLowerCase() &&
-        itemStatus &&
-        itemStatus !== "Absent" &&
-        itemStatus !== "Disputed"
+        effectiveStatus &&
+        effectiveStatus !== "Absent" &&
+        effectiveStatus !== "Disputed"
     );
 
     const canStartWithdraw = Boolean(canManageWithdraw && withdrawingTimestamp === 0);
@@ -249,11 +257,33 @@ export function KlerosCurateVerification(props: {
         );
     }
 
-    const collateralized = Boolean(data.found && data.itemID);
-    const isDisputed = Boolean(data.disputed || itemStatus === "Disputed");
-    const isWithdrawn = itemStatus === "Absent" && withdrawingTimestamp > 0;
+    const hasCurateRecord = Boolean(data.found && data.itemID);
+    const hasActiveCollateral = Boolean(hasCurateRecord && effectiveStatus !== "Absent");
+    const isDisputed = Boolean((data.disputed || effectiveStatus === "Disputed") && removalReason === null);
+    const isWithdrawn = removalReason === "withdrawn";
+    const isCollateralLost = removalReason === "challengerWon" || removalReason === "removed";
+    const collateralBadgeTone =
+        isCollateralLost
+            ? "border-red-500/30 bg-red-500/15 text-red-200"
+            : isWithdrawn
+              ? "border-orange-500/30 bg-orange-500/15 text-orange-200"
+              : isDisputed
+                ? "border-amber-500/30 bg-amber-500/15 text-amber-200"
+                : data.verified
+                  ? "border-emerald-500/30 bg-emerald-500/20 text-emerald-400"
+                  : "border-amber-500/30 bg-amber-500/15 text-amber-200";
+    const collateralBadgeLabel =
+        isCollateralLost
+            ? "Collateral lost"
+            : isWithdrawn
+              ? "Withdrawn"
+              : isDisputed
+                  ? "Collateralized - currently disputed"
+                  : data.verified
+                    ? "Collateral verified"
+                    : "Collateral submitted";
 
-    if (collateralized && data.itemID) {
+    if (hasCurateRecord && data.itemID) {
         const stake =
             pgtcrItem && pgtcrItem.success && pgtcrItem.item
                 ? BigInt(pgtcrItem.item.stake || "0")
@@ -262,18 +292,31 @@ export function KlerosCurateVerification(props: {
         return (
             <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
-                    <Badge className={isWithdrawn ? "bg-red-500/15 text-red-200 border-red-500/30" : isDisputed ? "bg-amber-500/15 text-amber-200 border-amber-500/30" : data.verified ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-amber-500/15 text-amber-200 border-amber-500/30"}>
-                        {isWithdrawn ? "Withdrawn" : isDisputed ? "Collateralized - currently disputed" : data.verified ? "Collateral verified" : "Collateral submitted"}
+                    <Badge className={collateralBadgeTone}>
+                        {collateralBadgeLabel}
                     </Badge>
 
                     {stake !== null ? (
-                        <Badge variant="outline" className={`font-mono ${isWithdrawn ? "line-through opacity-70" : ""}`}>
-                            Collateralized:{" "}
+                        <Badge
+                            variant="outline"
+                            className={`font-mono ${
+                                isCollateralLost
+                                    ? "border-red-500/30 text-red-200 line-through opacity-70"
+                                    : isWithdrawn
+                                      ? "border-orange-500/30 text-orange-200 line-through opacity-70"
+                                      : ""
+                            }`}
+                        >
+                            {isCollateralLost
+                                ? "Collateral lost:"
+                                : isWithdrawn
+                                  ? "Collateral withdrawn:"
+                                  : "Collateral:"}{" "}
                             {formatUnits(stake, resolvedTokenDecimals)} {resolvedTokenSymbol}
                         </Badge>
                     ) : null}
 
-                    {!isDisputed && !isWithdrawn ? <ChallengeAgentDialog itemID={data.itemID} /> : null}
+                    {hasActiveCollateral && !isDisputed ? <ChallengeAgentDialog itemID={data.itemID} /> : null}
 
                     {canStartWithdraw ? (
                         <Button size="sm" variant="outline" onClick={() => (withdrawingTimestamp === 0 ? setWithdrawConfirmOpen(true) : void onWithdrawItem())} disabled={withdrawing || chainId !== sepolia.id}>
