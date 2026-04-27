@@ -15,10 +15,17 @@ function extractAgentIdCandidate(value: string): string | null {
     return null;
 }
 
+function parseFreshParam(value: string | null): boolean {
+    if (!value) return false;
+    const normalized = value.trim().toLowerCase();
+    return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     const { id: rawId } = await params;
     const id = decodeURIComponent(rawId);
     const rawNetwork = request.nextUrl.searchParams.get("network");
+    const fresh = parseFreshParam(request.nextUrl.searchParams.get("fresh"));
 
     let network: AgentSubgraphNetwork = "sepolia";
     if (rawNetwork) {
@@ -38,7 +45,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             }
 
             try {
-                const fallbackAgent = await getAgentByAgentId(fallbackAgentId, network, 10, true);
+                const fallbackAgent = await getAgentByAgentId(fallbackAgentId, network, 10, !fresh);
                 if (fallbackAgent) {
                     return NextResponse.json({ success: true, agent: fallbackAgent, network });
                 }
@@ -56,14 +63,20 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             return NextResponse.json({ success: false, error: "Agent not found" }, { status: 404 });
         }
 
-        const agent = await Promise.race([
-            getAgentWithFeedback(id, 10, network),
-            new Promise<null>((resolve) => {
-                setTimeout(() => resolve(null), AGENT_DETAIL_TIMEOUT_MS);
-            }),
-        ]);
+        const agent = fresh
+            ? await getAgentWithFeedback(id, 10, network)
+            : await Promise.race([
+                getAgentWithFeedback(id, 10, network),
+                new Promise<null>((resolve) => {
+                    setTimeout(() => resolve(null), AGENT_DETAIL_TIMEOUT_MS);
+                }),
+            ]);
 
         if (!agent) {
+            if (fresh) {
+                return NextResponse.json({ success: false, error: "Agent not found" }, { status: 404 });
+            }
+
             const fastAgent = await getAgentWithFeedback(id, 10, network, true);
             if (fastAgent) {
                 return NextResponse.json({ success: true, agent: fastAgent, network });
@@ -90,6 +103,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
         return NextResponse.json({ success: true, agent, network });
     } catch (error) {
+        if (fresh) {
+            console.error("[Agent Detail API] Fresh fetch error:", error);
+            return NextResponse.json(
+                { success: false, error: error instanceof Error ? error.message : "Unknown error" },
+                { status: 500 }
+            );
+        }
+
         try {
             const fastAgent = await getAgentWithFeedback(id, 10, network, true);
             if (fastAgent) {

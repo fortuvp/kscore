@@ -5,6 +5,7 @@ import { sepolia } from "viem/chains";
 
 import { AGENT_NETWORK_CHAIN_IDS } from "@/lib/agent-networks";
 import { loadCurateRegistrationFile } from "@/lib/curate-agent-fallback";
+import { refreshAgentFeedbackFromChain } from "@/lib/reputation-feedback.server";
 import type { OrderBy, OrderDirection } from "@/lib/subgraph.handler";
 import type { AgentRegistrationFile, AgentWithDetails } from "@/types/agent";
 
@@ -360,5 +361,11 @@ export async function getSepoliaIdentityRegistryFallbackAgentByAgentId(agentIdLi
   if (!stub) return null;
 
   const [agent] = await hydrateAgentSlice([stub]);
-  return agent || null;
+  if (!agent) return null;
+
+  try {
+    return await refreshAgentFeedbackFromChain("sepolia", agent, 10);
+  } catch {
+    return agent;
+  }
 }

@@ -31,6 +31,14 @@ type FullFeedbackSnapshot = {
   endpoints: Map<string, string>;
 };
 
+type FeedbackLogMetadata = {
+  newestActivityAt: number | null;
+  createdAts: Map<string, string>;
+  txHashes: Map<string, string>;
+  feedbackUris: Map<string, string>;
+  endpoints: Map<string, string>;
+};
+
 type FeedbackFilePayload = NonNullable<Feedback["feedbackFile"]>;
 
 type NewFeedbackLogArgs = {
@@ -63,7 +71,7 @@ type ReputationFallbackConfig = {
 const REPUTATION_FEEDBACK_OVERFETCH = 40;
 const HEAD_CACHE_TTL_MS = 15_000;
 const SUBGRAPH_META_CACHE_TTL_MS = 60_000;
-const LOG_CHUNK_SIZE = 10_000n;
+const LOG_CHUNK_SIZE = 50_000n;
 const MIN_LOG_CHUNK_SIZE = 1_000n;
 const TX_BACKFILL_MAX_BLOCKS = 200_000n;
 const FEEDBACK_FETCH_TIMEOUT_MS = 6_000;
@@ -381,6 +389,13 @@ function readOptionalString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
+function readStringish(value: unknown): string | null {
+  if (typeof value === "string") return readOptionalString(value);
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "bigint") return value.toString();
+  return null;
+}
+
 function readOptionalStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
@@ -388,6 +403,85 @@ function readOptionalStringArray(value: unknown): string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function createFeedbackTextPayload(text: string | null): FeedbackFilePayload | null {
+  if (!text) return null;
+  return {
+    text,
+    mcpTool: null,
+    mcpPrompt: null,
+    mcpResource: null,
+    a2aSkills: [],
+    a2aContextId: null,
+    a2aTaskId: null,
+  };
+}
+
+function readReputationOracleEvidenceText(value: Record<string, unknown>): string | null {
+  if (readOptionalString(value.schema) !== "kleros-reputation-oracle/v1") return null;
+
+  const agentId = readStringish(value.agentId);
+  const tag1 = readOptionalString(value.tag1);
+  if (!agentId || !tag1) return null;
+
+  const kleros = isRecord(value.kleros) ? value.kleros : null;
+  const pgtcrAddress = readOptionalString(kleros?.pgtcrAddress);
+  const registrySuffix = pgtcrAddress ? ` (${pgtcrAddress})` : "";
+  const stakeAmount = readStringish(kleros?.stakeAmount);
+  const stakeToken = readOptionalString(kleros?.stakeToken);
+  const stakeSuffix = stakeAmount && stakeToken ? ` with ${stakeAmount} ${stakeToken} staked` : "";
+
+  if (tag1 === "verified") {
+    return `Agent ${agentId} is actively collateralized in the Kleros Verified Agents Registry${registrySuffix}${stakeSuffix}. No active disputes.`;
+  }
+
+  if (tag1 === "removed") {
+    const disputeId = readStringish(kleros?.disputeId);
+    if (disputeId) {
+      return `Agent ${agentId} was removed from the Kleros Verified Agents Registry${registrySuffix} after Kleros dispute #${disputeId}. Challenger prevailed.`;
+    }
+    return `Agent ${agentId} was removed from the Kleros Verified Agents Registry${registrySuffix}.`;
+  }
+
+  return null;
+}
+
+function readFeedbackText(value: unknown): string | null {
+  if (!isRecord(value)) return readOptionalString(value);
+
+  return (
+    readOptionalString(value.text) ||
+    readOptionalString(value.content) ||
+    readOptionalString(value.message) ||
+    readOptionalString(value.description) ||
+    readOptionalString(value.comment) ||
+    readOptionalString(value.review) ||
+    readOptionalString(value.body) ||
+    readOptionalString(value.feedback) ||
+    readReputationOracleEvidenceText(value)
+  );
+}
+
+function splitFeedbackUriReference(uri: string) {
+  const trimmed = uri.trim();
+  if (!trimmed) return { fetchUri: "", fragment: null as string | null };
+
+  const hashIndex = trimmed.indexOf("#");
+  if (hashIndex === -1) return { fetchUri: trimmed, fragment: null as string | null };
+
+  const fetchUri = trimmed.slice(0, hashIndex);
+  const rawFragment = trimmed.slice(hashIndex + 1).trim();
+  let fragment = rawFragment || null;
+  if (fragment) {
+    try {
+      fragment = decodeURIComponent(fragment);
+    } catch {
+      // Keep the raw fragment if decoding fails.
+    }
+  }
+
+  return { fetchUri, fragment };
 }
 
 function getFeedbackUriFetchUrl(uri: string): string | null {
@@ -403,11 +497,15 @@ function getFeedbackUriFetchUrl(uri: string): string | null {
 }
 
 function normalizeFeedbackFilePayload(payload: unknown): FeedbackFilePayload | null {
+  if (typeof payload === "string") {
+    return createFeedbackTextPayload(readOptionalString(payload));
+  }
+
   if (!isRecord(payload)) return null;
 
   const mcp = isRecord(payload.mcp) ? payload.mcp : null;
   const a2a = isRecord(payload.a2a) ? payload.a2a : null;
-  const text = readOptionalString(payload.text);
+  const text = readFeedbackText(payload);
   const mcpTool = readOptionalString(mcp?.tool) ?? readOptionalString(payload.mcpTool);
   const mcpPrompt = readOptionalString(mcp?.prompt) ?? readOptionalString(payload.mcpPrompt);
   const mcpResource = readOptionalString(mcp?.resource) ?? readOptionalString(payload.mcpResource);
@@ -430,6 +528,44 @@ function normalizeFeedbackFilePayload(payload: unknown): FeedbackFilePayload | n
   };
 }
 
+function resolveFeedbackPayloadFromFragment(payload: unknown, fragment: string | null): unknown {
+  const normalized = fragment?.trim();
+  if (!normalized) return payload;
+
+  const queue: unknown[] = [payload];
+  const visited = new Set<unknown>();
+  const identityFields = ["id", "key", "slug", "name", "ref", "anchor"];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || visited.has(current)) continue;
+    visited.add(current);
+
+    if (Array.isArray(current)) {
+      for (const item of current) queue.push(item);
+      continue;
+    }
+
+    if (!isRecord(current)) continue;
+
+    if (Object.prototype.hasOwnProperty.call(current, normalized)) {
+      return current[normalized];
+    }
+
+    for (const field of identityFields) {
+      if (readOptionalString(current[field]) === normalized) {
+        return current;
+      }
+    }
+
+    for (const value of Object.values(current)) {
+      if (Array.isArray(value) || isRecord(value)) queue.push(value);
+    }
+  }
+
+  return payload;
+}
+
 function parseDataUriPayload(uri: string): unknown | null {
   const trimmed = uri.trim();
   if (!trimmed.startsWith("data:")) return null;
@@ -443,20 +579,31 @@ function parseDataUriPayload(uri: string): unknown | null {
     ? Buffer.from(payload, "base64").toString("utf8")
     : decodeURIComponent(payload);
 
-  return JSON.parse(decoded) as unknown;
+  if (metadata.includes("application/json") || metadata.includes("+json")) {
+    return JSON.parse(decoded) as unknown;
+  }
+
+  try {
+    return JSON.parse(decoded) as unknown;
+  } catch {
+    return decoded;
+  }
 }
 
 async function fetchFeedbackFileFromUri(uri: string): Promise<FeedbackFilePayload | null> {
+  const { fetchUri, fragment } = splitFeedbackUriReference(uri);
+
   try {
-    const dataUriPayload = parseDataUriPayload(uri);
+    const dataUriPayload = parseDataUriPayload(fetchUri);
     if (dataUriPayload !== null) {
-      return normalizeFeedbackFilePayload(dataUriPayload);
+      const resolvedPayload = resolveFeedbackPayloadFromFragment(dataUriPayload, fragment);
+      return normalizeFeedbackFilePayload(resolvedPayload) ?? normalizeFeedbackFilePayload(dataUriPayload);
     }
   } catch {
     return null;
   }
 
-  const url = getFeedbackUriFetchUrl(uri);
+  const url = getFeedbackUriFetchUrl(fetchUri);
   if (!url) return null;
 
   const controller = new AbortController();
@@ -477,8 +624,17 @@ async function fetchFeedbackFileFromUri(uri: string): Promise<FeedbackFilePayloa
     const body = await response.text();
     if (!body.trim()) return null;
 
-    const payload = JSON.parse(body) as unknown;
-    return normalizeFeedbackFilePayload(payload);
+    if (contentType.includes("text/plain")) {
+      return createFeedbackTextPayload(readOptionalString(body));
+    }
+
+    try {
+      const payload = JSON.parse(body) as unknown;
+      const resolvedPayload = resolveFeedbackPayloadFromFragment(payload, fragment);
+      return normalizeFeedbackFilePayload(resolvedPayload) ?? normalizeFeedbackFilePayload(payload);
+    } catch {
+      return createFeedbackTextPayload(readOptionalString(body));
+    }
   } catch {
     return null;
   } finally {
@@ -559,6 +715,67 @@ async function finalizeAgentFeedback(
   return {
     ...trimmed,
     feedback: hydratedFeedback,
+  };
+}
+
+async function collectNewFeedbackLogMetadata(
+  publicClient: ReturnType<typeof createPublicClient>,
+  network: AgentSubgraphNetwork,
+  numericAgentId: bigint,
+  fromBlock: bigint,
+  toBlock: bigint,
+  getBlockTimestamp: (blockNumber: bigint) => Promise<number>,
+  targetFeedbackIds?: Set<string>
+): Promise<FeedbackLogMetadata> {
+  const config = REPUTATION_FALLBACK_CONFIGS[network];
+  const createdAts = new Map<string, string>();
+  const txHashes = new Map<string, string>();
+  const feedbackUris = new Map<string, string>();
+  const endpoints = new Map<string, string>();
+  let newestActivityAt = 0;
+
+  const logs = await getLogsWithAdaptiveChunking(
+    publicClient,
+    {
+      address: config.reputationRegistryAddress,
+      event: LOG_NEW_FEEDBACK,
+      args: { agentId: numericAgentId },
+    },
+    fromBlock,
+    toBlock
+  );
+
+  for (const log of logs) {
+    const {
+      agentId: eventAgentId,
+      clientAddress,
+      feedbackIndex,
+      endpoint,
+      feedbackURI,
+    } = (log as typeof log & { args: NewFeedbackLogArgs }).args;
+    if (eventAgentId === undefined || clientAddress === undefined || feedbackIndex === undefined) {
+      continue;
+    }
+
+    const feedbackId = buildFeedbackId(network, eventAgentId, clientAddress, feedbackIndex);
+    if (targetFeedbackIds && !targetFeedbackIds.has(feedbackId)) continue;
+
+    if (log.transactionHash) txHashes.set(feedbackId, log.transactionHash);
+    if (endpoint) endpoints.set(feedbackId, endpoint);
+    if (feedbackURI) feedbackUris.set(feedbackId, feedbackURI);
+    if (log.blockNumber === null) continue;
+
+    const createdAt = await getBlockTimestamp(log.blockNumber);
+    createdAts.set(feedbackId, createdAt.toString());
+    if (createdAt > newestActivityAt) newestActivityAt = createdAt;
+  }
+
+  return {
+    newestActivityAt: newestActivityAt > 0 ? newestActivityAt : null,
+    createdAts,
+    txHashes,
+    feedbackUris,
+    endpoints,
   };
 }
 
@@ -816,44 +1033,6 @@ async function fetchFullFeedbackSnapshot(
       });
 
       const [clientsList, feedbackIndexes, values, valueDecimals, tag1s, tag2s] = readAllFeedbackResult;
-      if (clientsList.length > 0) {
-        const fallbackTimestamp = String(
-          Math.max(
-            Number.parseInt(agent.lastActivity, 10) || 0,
-            Number.parseInt(agent.createdAt, 10) || 0
-          )
-        );
-        const snapshot: FullFeedbackSnapshot = {
-          feedback: clientsList.map((clientAddress, index) => {
-            const feedbackIndex = BigInt(feedbackIndexes[index] ?? 0);
-            const rawValue = BigInt(values[index] ?? 0);
-            const decimals = Number(valueDecimals[index] ?? 0);
-            return {
-              id: buildFeedbackId(network, numericAgentId, clientAddress, feedbackIndex),
-              value: formatFeedbackValue(rawValue, decimals),
-              tag1: tag1s[index] || null,
-              tag2: tag2s[index] || null,
-              endpoint: null,
-              clientAddress: clientAddress.toLowerCase(),
-              createdAt: fallbackTimestamp,
-              feedbackURI: null,
-              txHash: null,
-              feedbackFile: null,
-            } satisfies Feedback;
-          }),
-          totalFeedback: clientsList.length,
-          newestActivityAt: Number.parseInt(fallbackTimestamp, 10) || null,
-          txHashes: new Map<string, string>(),
-          feedbackUris: new Map<string, string>(),
-          endpoints: new Map<string, string>(),
-        };
-        fullFeedbackCacheByKey.set(cacheKey, {
-          expiresAt: now + FULL_FEEDBACK_CACHE_TTL_MS,
-          value: snapshot,
-        });
-        return snapshot;
-      }
-
       const headBlock = await publicClient.getBlockNumber();
       const blockTimestampCache = new Map<bigint, number>();
       async function getBlockTimestamp(blockNumber: bigint): Promise<number> {
@@ -888,6 +1067,79 @@ async function fetchFullFeedbackSnapshot(
             snapshotStartBlock = config.reputationStartBlock;
           }
         }
+      }
+
+      if (clientsList.length > 0) {
+        const fallbackTimestamp = String(
+          Math.max(
+            Number.parseInt(agent.lastActivity, 10) || 0,
+            Number.parseInt(agent.createdAt, 10) || 0
+          )
+        );
+        const baseFeedback = clientsList.map((clientAddress, index) => {
+          const feedbackIndex = BigInt(feedbackIndexes[index] ?? 0);
+          const rawValue = BigInt(values[index] ?? 0);
+          const decimals = Number(valueDecimals[index] ?? 0);
+          return {
+            id: buildFeedbackId(network, numericAgentId, clientAddress, feedbackIndex),
+            value: formatFeedbackValue(rawValue, decimals),
+            tag1: tag1s[index] || null,
+            tag2: tag2s[index] || null,
+            endpoint: null,
+            clientAddress: clientAddress.toLowerCase(),
+            createdAt: fallbackTimestamp,
+            feedbackURI: null,
+            txHash: null,
+            feedbackFile: null,
+          } satisfies Feedback;
+        });
+
+        const targetFeedbackIds = new Set(baseFeedback.map((item) => item.id));
+        let metadata: FeedbackLogMetadata = {
+          newestActivityAt: null,
+          createdAts: new Map<string, string>(),
+          txHashes: new Map<string, string>(),
+          feedbackUris: new Map<string, string>(),
+          endpoints: new Map<string, string>(),
+        };
+
+        try {
+          metadata = await collectNewFeedbackLogMetadata(
+            publicClient,
+            network,
+            numericAgentId,
+            snapshotStartBlock,
+            headBlock,
+            getBlockTimestamp,
+            targetFeedbackIds
+          );
+        } catch {
+          // Numeric feedback remains usable even when an RPC provider cannot serve the older event range.
+        }
+
+        const feedback = baseFeedback
+          .map((item) => ({
+            ...item,
+            endpoint: metadata.endpoints.get(item.id) || item.endpoint || null,
+            createdAt: metadata.createdAts.get(item.id) || item.createdAt,
+            feedbackURI: metadata.feedbackUris.get(item.id) || item.feedbackURI || null,
+            txHash: metadata.txHashes.get(item.id) || item.txHash || null,
+          }))
+          .sort(compareFeedbackDesc);
+
+        const snapshot: FullFeedbackSnapshot = {
+          feedback,
+          totalFeedback: clientsList.length,
+          newestActivityAt: metadata.newestActivityAt || Number.parseInt(fallbackTimestamp, 10) || null,
+          txHashes: metadata.txHashes,
+          feedbackUris: metadata.feedbackUris,
+          endpoints: metadata.endpoints,
+        };
+        fullFeedbackCacheByKey.set(cacheKey, {
+          expiresAt: now + FULL_FEEDBACK_CACHE_TTL_MS,
+          value: snapshot,
+        });
+        return snapshot;
       }
 
       const newFeedbackLogs = await getLogsWithAdaptiveChunking(

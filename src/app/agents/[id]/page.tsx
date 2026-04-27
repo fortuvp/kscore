@@ -127,7 +127,7 @@ export default function AgentDetailPage() {
 
                     try {
                         const detailResponse = await fetch(
-                            `/api/agents/${encodeURIComponent(detailId)}?network=${encodeURIComponent(network)}`,
+                            `/api/agents/${encodeURIComponent(detailId)}?network=${encodeURIComponent(network)}&fresh=1`,
                             { cache: "no-store" }
                         );
                         const detailData = await detailResponse.json();
@@ -143,8 +143,8 @@ export default function AgentDetailPage() {
 
                 const shouldTryAgentIdFirst = lookup === "agentId" || looksLikeAgentId(id);
                 const primaryUrl = shouldTryAgentIdFirst
-                    ? `/api/agents/by-agent-id?agentId=${encodeURIComponent(id)}&network=${encodeURIComponent(network)}`
-                    : `/api/agents/${encodeURIComponent(id)}?network=${encodeURIComponent(network)}`;
+                    ? `/api/agents/by-agent-id?agentId=${encodeURIComponent(id)}&network=${encodeURIComponent(network)}&fresh=1`
+                    : `/api/agents/${encodeURIComponent(id)}?network=${encodeURIComponent(network)}&fresh=1`;
 
                 const primaryResponse = await fetch(primaryUrl);
                 const primaryData = await primaryResponse.json();
@@ -156,8 +156,8 @@ export default function AgentDetailPage() {
                 }
 
                 const fallbackUrl = shouldTryAgentIdFirst
-                    ? `/api/agents/${encodeURIComponent(id)}?network=${encodeURIComponent(network)}`
-                    : `/api/agents/by-agent-id?agentId=${encodeURIComponent(id)}&network=${encodeURIComponent(network)}`;
+                    ? `/api/agents/${encodeURIComponent(id)}?network=${encodeURIComponent(network)}&fresh=1`
+                    : `/api/agents/by-agent-id?agentId=${encodeURIComponent(id)}&network=${encodeURIComponent(network)}&fresh=1`;
                 const fallbackResponse = await fetch(fallbackUrl);
                 const fallbackData = await fallbackResponse.json();
 
@@ -262,6 +262,37 @@ export default function AgentDetailPage() {
         window.addEventListener("storage", refreshReports);
         return () => window.removeEventListener("storage", refreshReports);
     }, [agent?.agentId]);
+
+    useEffect(() => {
+        const currentAgentId = agent?.agentId ? String(agent.agentId) : "";
+        if (!currentAgentId) return;
+
+        let cancelled = false;
+        async function refreshFreshAgentByAgentId() {
+            try {
+                const res = await fetch(
+                    `/api/agents/by-agent-id?agentId=${encodeURIComponent(currentAgentId)}&network=${encodeURIComponent(network)}&fresh=1`,
+                    { cache: "no-store" }
+                );
+                const json = await res.json();
+                if (cancelled) return;
+                if (json?.success && json?.item && String(json.item.agentId || "") === currentAgentId) {
+                    setAgent((existing) => {
+                        if (!existing) return json.item as AgentWithDetails;
+                        if (String(existing.agentId || "") !== currentAgentId) return existing;
+                        return json.item as AgentWithDetails;
+                    });
+                }
+            } catch {
+                // Keep the initially loaded payload when the follow-up refresh fails.
+            }
+        }
+
+        void refreshFreshAgentByAgentId();
+        return () => {
+            cancelled = true;
+        };
+    }, [agent?.agentId, network]);
 
     useEffect(() => {
         if (!agentOwner || !agentChainId || !agentCreatedAt) {

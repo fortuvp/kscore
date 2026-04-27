@@ -50,6 +50,7 @@ type AgentPreview = {
   image: string | null;
   network: AgentSubgraphNetwork;
   resolved: boolean;
+  lookupAttempted?: boolean;
 };
 
 type DisplayAgent = Parameters<typeof getDisplayName>[0];
@@ -267,12 +268,22 @@ export default function VerifiedAgentsPage() {
   React.useEffect(() => {
     let cancelled = false;
     async function hydrate() {
+      const seen = new Set<string>();
       const want = derived
         .map((r) => ({ agentId: r.key0, network: r.network }))
-        .filter((r) => r.agentId && isAgentSubgraphNetwork(r.network))
+        .filter((r) => {
+          if (!r.agentId || !isAgentSubgraphNetwork(r.network)) return false;
+          const key = `${r.network}:${r.agentId}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
         .slice(0, 60);
 
-      const missing = want.filter((r) => !previewByKey[`${r.network}:${r.agentId}`]);
+      const missing = want.filter((r) => {
+        const existing = previewByKey[`${r.network}:${r.agentId}`];
+        return !existing?.resolved && !existing?.lookupAttempted;
+      });
       if (!missing.length) return;
 
       const updates = await Promise.all(
@@ -299,12 +310,21 @@ export default function VerifiedAgentsPage() {
                 image,
                 network: resolvedNetwork,
                 resolved: Boolean(agent),
+                lookupAttempted: true,
               },
             ] as const;
           } catch {
             return [
               `${r.network}:${r.agentId}`,
-              { id: r.agentId, agentId: r.agentId, name: `Agent #${r.agentId}`, image: null, network: r.network, resolved: false },
+              {
+                id: r.agentId,
+                agentId: r.agentId,
+                name: `Agent #${r.agentId}`,
+                image: null,
+                network: r.network,
+                resolved: false,
+                lookupAttempted: true,
+              },
             ] as const;
           }
         })
@@ -318,7 +338,9 @@ export default function VerifiedAgentsPage() {
           if (existing?.resolved && !v.resolved) continue;
           next[k] = {
             ...v,
+            name: v.resolved ? v.name : existing?.name || v.name,
             image: v.image || existing?.image || null,
+            lookupAttempted: v.lookupAttempted || existing?.lookupAttempted,
           };
         }
         return next;
@@ -440,7 +462,6 @@ export default function VerifiedAgentsPage() {
                   </div>
                   <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <span className="max-w-full truncate font-mono">{preview?.agentId || key0 || "-"}</span>
-                    {!isResolved ? <span className="shrink-0 text-amber-300">agent not found</span> : null}
                     <span className="shrink-0">|</span>
                     <span className="truncate">{getAgentSubgraphLabel(resolvedNetwork)}</span>
                   </div>

@@ -12,6 +12,12 @@ import type { AgentWithDetails } from "@/types/agent";
 
 const SUBGRAPH_LOOKUP_TIMEOUT_MS = 6000;
 
+function parseFreshParam(value: string | null): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
 function getFeedbackScore(agent: AgentWithDetails | null | undefined): number {
   if (!agent) return -1;
   const totalFeedback = Number.parseInt(agent.totalFeedback || "0", 10) || 0;
@@ -47,7 +53,8 @@ function getNetworkSearchOrder(
 
 async function resolveAgentByAgentId(
   agentIdParam: string,
-  requestedNetwork: AgentSubgraphNetwork | null
+  requestedNetwork: AgentSubgraphNetwork | null,
+  fresh = false
 ) {
   const checked: Array<{ network: AgentSubgraphNetwork; agentId: string }> = [];
   const seen = new Set<string>();
@@ -60,12 +67,14 @@ async function resolveAgentByAgentId(
       checked.push({ network, agentId: candidate });
 
       try {
-        const agent = await Promise.race([
-          getAgentByAgentId(candidate, network, 10, true),
-          new Promise<null>((resolve) => {
-            setTimeout(() => resolve(null), SUBGRAPH_LOOKUP_TIMEOUT_MS);
-          }),
-        ]);
+        const agent = fresh
+          ? await getAgentByAgentId(candidate, network, 10, false)
+          : await Promise.race([
+              getAgentByAgentId(candidate, network, 10, true),
+              new Promise<null>((resolve) => {
+                setTimeout(() => resolve(null), SUBGRAPH_LOOKUP_TIMEOUT_MS);
+              }),
+            ]);
         if (agent) {
           return { agent, network, agentId: candidate, checked };
         }
@@ -83,6 +92,7 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const agentIdParam = url.searchParams.get("agentId")?.trim();
     const rawNetwork = url.searchParams.get("network");
+    const fresh = parseFreshParam(url.searchParams.get("fresh"));
 
     let requestedNetwork: AgentSubgraphNetwork | null = null;
     if (rawNetwork) {
@@ -102,12 +112,9 @@ export async function GET(req: Request) {
       );
     }
 
-    const [resolved, curateFallback, sepoliaFallback] = await Promise.all([
-      resolveAgentByAgentId(agentIdParam, requestedNetwork),
+    const [resolved, curateFallback] = await Promise.all([
+      resolveAgentByAgentId(agentIdParam, requestedNetwork, fresh),
       getCurateFallbackAgentByAgentId(agentIdParam, requestedNetwork),
-      requestedNetwork && requestedNetwork !== "sepolia"
-        ? Promise.resolve(null)
-        : getSepoliaIdentityRegistryFallbackAgentByAgentId(agentIdParam),
     ]);
 
     const bestResolvedAgent =
@@ -144,6 +151,11 @@ export async function GET(req: Request) {
         item: curateFallback.agent,
       });
     }
+
+    const sepoliaFallback =
+      requestedNetwork && requestedNetwork !== "sepolia"
+        ? null
+        : await getSepoliaIdentityRegistryFallbackAgentByAgentId(agentIdParam);
 
     if (sepoliaFallback) {
       return NextResponse.json({
