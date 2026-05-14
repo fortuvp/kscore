@@ -192,7 +192,8 @@ function matchesFallbackQuery(agent: AgentWithDetails, query: string) {
 export async function getCurateFallbackAgentByAgentId(
   agentIdLike: string,
   network?: AgentSubgraphNetwork | null,
-  feedbackFirst = 10
+  feedbackFirst = 10,
+  options?: { skipChainRefresh?: boolean }
 ) {
   try {
     if (getCurateMode() !== "pgtcr") return null;
@@ -218,11 +219,13 @@ export async function getCurateFallbackAgentByAgentId(
       includedAt: item.includedAt,
       registrationFile,
     });
-    const hydratedAgent = await refreshAgentFeedbackFromChain(
-      inferredNetwork,
-      fallbackAgent,
-      feedbackFirst
-    );
+    const hydratedAgent = options?.skipChainRefresh
+      ? fallbackAgent
+      : await refreshAgentFeedbackFromChain(
+          inferredNetwork,
+          fallbackAgent,
+          feedbackFirst
+        );
 
     return {
       agent: hydratedAgent,

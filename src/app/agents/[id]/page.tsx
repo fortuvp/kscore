@@ -86,6 +86,7 @@ export default function AgentDetailPage() {
 
     const [agent, setAgent] = useState<AgentWithDetails | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [isRefreshingFeedback, setIsRefreshingFeedback] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [curateFallbackUrl, setCurateFallbackUrl] = useState<string | null>(null);
     const [fallbackItemId, setFallbackItemId] = useState<string | null>(null);
@@ -114,6 +115,7 @@ export default function AgentDetailPage() {
     useEffect(() => {
         async function fetchAgent() {
             setIsLoading(true);
+            setIsRefreshingFeedback(false);
             setError(null);
             setCurateFallbackUrl(null);
             setFallbackItemId(null);
@@ -127,7 +129,7 @@ export default function AgentDetailPage() {
 
                     try {
                         const detailResponse = await fetch(
-                            `/api/agents/${encodeURIComponent(detailId)}?network=${encodeURIComponent(network)}&fresh=1`,
+                            `/api/agents/${encodeURIComponent(detailId)}?network=${encodeURIComponent(network)}`,
                             { cache: "no-store" }
                         );
                         const detailData = await detailResponse.json();
@@ -143,10 +145,10 @@ export default function AgentDetailPage() {
 
                 const shouldTryAgentIdFirst = lookup === "agentId" || looksLikeAgentId(id);
                 const primaryUrl = shouldTryAgentIdFirst
-                    ? `/api/agents/by-agent-id?agentId=${encodeURIComponent(id)}&network=${encodeURIComponent(network)}&fresh=1`
-                    : `/api/agents/${encodeURIComponent(id)}?network=${encodeURIComponent(network)}&fresh=1`;
+                    ? `/api/agents/by-agent-id?agentId=${encodeURIComponent(id)}&network=${encodeURIComponent(network)}`
+                    : `/api/agents/${encodeURIComponent(id)}?network=${encodeURIComponent(network)}`;
 
-                const primaryResponse = await fetch(primaryUrl);
+                const primaryResponse = await fetch(primaryUrl, { cache: "no-store" });
                 const primaryData = await primaryResponse.json();
 
                 if (primaryData?.success && (primaryData?.agent || primaryData?.item)) {
@@ -156,9 +158,9 @@ export default function AgentDetailPage() {
                 }
 
                 const fallbackUrl = shouldTryAgentIdFirst
-                    ? `/api/agents/${encodeURIComponent(id)}?network=${encodeURIComponent(network)}&fresh=1`
-                    : `/api/agents/by-agent-id?agentId=${encodeURIComponent(id)}&network=${encodeURIComponent(network)}&fresh=1`;
-                const fallbackResponse = await fetch(fallbackUrl);
+                    ? `/api/agents/${encodeURIComponent(id)}?network=${encodeURIComponent(network)}`
+                    : `/api/agents/by-agent-id?agentId=${encodeURIComponent(id)}&network=${encodeURIComponent(network)}`;
+                const fallbackResponse = await fetch(fallbackUrl, { cache: "no-store" });
                 const fallbackData = await fallbackResponse.json();
 
                 if (fallbackData?.success && (fallbackData?.agent || fallbackData?.item)) {
@@ -265,10 +267,14 @@ export default function AgentDetailPage() {
 
     useEffect(() => {
         const currentAgentId = agent?.agentId ? String(agent.agentId) : "";
-        if (!currentAgentId) return;
+        if (!currentAgentId) {
+            setIsRefreshingFeedback(false);
+            return;
+        }
 
         let cancelled = false;
         async function refreshFreshAgentByAgentId() {
+            setIsRefreshingFeedback(true);
             try {
                 const res = await fetch(
                     `/api/agents/by-agent-id?agentId=${encodeURIComponent(currentAgentId)}&network=${encodeURIComponent(network)}&fresh=1`,
@@ -285,6 +291,8 @@ export default function AgentDetailPage() {
                 }
             } catch {
                 // Keep the initially loaded payload when the follow-up refresh fails.
+            } finally {
+                if (!cancelled) setIsRefreshingFeedback(false);
             }
         }
 
@@ -440,6 +448,7 @@ export default function AgentDetailPage() {
     }
 
     const totalFeedback = parseInt(agent.totalFeedback) || 0;
+    const reviewsPending = isRefreshingFeedback && totalFeedback === 0 && agent.feedback.length === 0;
     const onChainReports = realityQuestions.data.filter((q) => {
         return doesQuestionMatchAgent(q.question, String(agent.agentId), network);
     });
@@ -730,7 +739,7 @@ export default function AgentDetailPage() {
                             <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
                                 <span className="flex items-center gap-1.5">
                                     <MessageSquare className="h-4 w-4" />
-                                    {totalFeedback} Reviews
+                                    {reviewsPending ? "Updating reviews..." : `${totalFeedback} Reviews`}
                                 </span>
                                 <span className="flex items-center gap-1.5">
                                     <Clock className="h-4 w-4" />
@@ -846,7 +855,7 @@ export default function AgentDetailPage() {
                                         <h2 className="font-semibold">Reviews</h2>
                                         <div className="flex flex-wrap items-center gap-2">
                                             <Badge className="border-cyan-400/35 bg-cyan-400/12 text-cyan-200">
-                                                {totalFeedback} total reviews
+                                                {reviewsPending ? "Updating reviews" : `${totalFeedback} total reviews`}
                                             </Badge>
                                             <Badge variant="outline" className="border-emerald-400/35 bg-emerald-400/10 text-emerald-200">
                                                 {agent.feedback.length} loaded
@@ -975,7 +984,9 @@ export default function AgentDetailPage() {
                                             ))}
                                         </div>
                                     ) : (
-                                        <p className="text-sm text-muted-foreground">No reviews yet.</p>
+                                        <p className="text-sm text-muted-foreground">
+                                            {reviewsPending ? "Checking on-chain reviews..." : "No reviews yet."}
+                                        </p>
                                     )}
                                 </div>
 

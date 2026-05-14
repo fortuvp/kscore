@@ -63,8 +63,8 @@ function resolveAgentNetwork(agent: Pick<Agent, "chainId">, fallback: AgentSubgr
   return getAgentNetworkFromChainId(agent.chainId) || fallback;
 }
 
-function getUniqueKey(agent: Pick<Agent, "id" | "chainId">, fallback: AgentSubgraphNetwork): string {
-  return `${resolveAgentNetwork(agent, fallback)}:${agent.id}`;
+function getUniqueKey(agent: Pick<Agent, "id" | "agentId" | "chainId">, fallback: AgentSubgraphNetwork): string {
+  return buildCollateralKey(resolveAgentNetwork(agent, fallback), agent.agentId || agent.id);
 }
 
 function toNumericValue(value: string | null | undefined): number {

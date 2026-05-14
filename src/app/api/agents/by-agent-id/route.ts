@@ -11,6 +11,16 @@ import { getSepoliaIdentityRegistryFallbackAgentByAgentId } from "@/lib/identity
 import type { AgentWithDetails } from "@/types/agent";
 
 const SUBGRAPH_LOOKUP_TIMEOUT_MS = 6000;
+const FAST_LOOKUP_TIMEOUT_MS = 3000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => {
+      setTimeout(() => resolve(fallback), timeoutMs);
+    }),
+  ]);
+}
 
 function parseFreshParam(value: string | null): boolean {
   if (!value) return false;
@@ -67,14 +77,11 @@ async function resolveAgentByAgentId(
       checked.push({ network, agentId: candidate });
 
       try {
-        const agent = fresh
-          ? await getAgentByAgentId(candidate, network, 10, false)
-          : await Promise.race([
-              getAgentByAgentId(candidate, network, 10, true),
-              new Promise<null>((resolve) => {
-                setTimeout(() => resolve(null), SUBGRAPH_LOOKUP_TIMEOUT_MS);
-              }),
-            ]);
+        const agent = await withTimeout(
+          getAgentByAgentId(candidate, network, 10, !fresh),
+          fresh ? SUBGRAPH_LOOKUP_TIMEOUT_MS : FAST_LOOKUP_TIMEOUT_MS,
+          null
+        );
         if (agent) {
           return { agent, network, agentId: candidate, checked };
         }
@@ -114,7 +121,11 @@ export async function GET(req: Request) {
 
     const [resolved, curateFallback] = await Promise.all([
       resolveAgentByAgentId(agentIdParam, requestedNetwork, fresh),
-      getCurateFallbackAgentByAgentId(agentIdParam, requestedNetwork),
+      withTimeout(
+        getCurateFallbackAgentByAgentId(agentIdParam, requestedNetwork, 10, { skipChainRefresh: !fresh }),
+        fresh ? SUBGRAPH_LOOKUP_TIMEOUT_MS : FAST_LOOKUP_TIMEOUT_MS,
+        null
+      ),
     ]);
 
     const bestResolvedAgent =
@@ -155,7 +166,11 @@ export async function GET(req: Request) {
     const sepoliaFallback =
       requestedNetwork && requestedNetwork !== "sepolia"
         ? null
-        : await getSepoliaIdentityRegistryFallbackAgentByAgentId(agentIdParam);
+        : await withTimeout(
+            getSepoliaIdentityRegistryFallbackAgentByAgentId(agentIdParam, { skipChainRefresh: !fresh }),
+            fresh ? SUBGRAPH_LOOKUP_TIMEOUT_MS : FAST_LOOKUP_TIMEOUT_MS,
+            null
+          );
 
     if (sepoliaFallback) {
       return NextResponse.json({

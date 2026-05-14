@@ -353,7 +353,10 @@ export async function searchSepoliaIdentityRegistryFallbackAgents(params: {
   });
 }
 
-export async function getSepoliaIdentityRegistryFallbackAgentByAgentId(agentIdLike: string) {
+export async function getSepoliaIdentityRegistryFallbackAgentByAgentId(
+  agentIdLike: string,
+  options?: { skipChainRefresh?: boolean }
+) {
   const agentId = agentIdLike.trim();
   if (!/^\d+$/.test(agentId)) return null;
 
@@ -362,6 +365,7 @@ export async function getSepoliaIdentityRegistryFallbackAgentByAgentId(agentIdLi
 
   const [agent] = await hydrateAgentSlice([stub]);
   if (!agent) return null;
+  if (options?.skipChainRefresh) return agent;
 
   try {
     return await refreshAgentFeedbackFromChain("sepolia", agent, 10);

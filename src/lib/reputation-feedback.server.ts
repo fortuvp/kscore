@@ -367,8 +367,14 @@ function buildFeedbackId(
 }
 
 function shouldAttemptFullFeedbackSnapshot(network: AgentSubgraphNetwork, agent: AgentWithDetails): boolean {
+  const enabled = parseBooleanFlag(process.env.FEATURE_REPUTATION_FULL_FEEDBACK_SNAPSHOT) ?? true;
+  if (!enabled) return false;
   if (network !== "sepolia") return false;
   return agent.feedback.length === 0 || (Number.parseInt(agent.totalFeedback, 10) || 0) === 0;
+}
+
+function shouldHydrateFullFeedbackMetadata(): boolean {
+  return parseBooleanFlag(process.env.FEATURE_REPUTATION_FULL_FEEDBACK_METADATA) ?? false;
 }
 
 function compareFeedbackDesc(left: Feedback, right: Feedback): number {
@@ -1095,6 +1101,22 @@ async function fetchFullFeedbackSnapshot(
         });
 
         const targetFeedbackIds = new Set(baseFeedback.map((item) => item.id));
+        if (!shouldHydrateFullFeedbackMetadata()) {
+          const snapshot: FullFeedbackSnapshot = {
+            feedback: baseFeedback.sort(compareFeedbackDesc),
+            totalFeedback: clientsList.length,
+            newestActivityAt: Number.parseInt(fallbackTimestamp, 10) || null,
+            txHashes: new Map<string, string>(),
+            feedbackUris: new Map<string, string>(),
+            endpoints: new Map<string, string>(),
+          };
+          fullFeedbackCacheByKey.set(cacheKey, {
+            expiresAt: now + FULL_FEEDBACK_CACHE_TTL_MS,
+            value: snapshot,
+          });
+          return snapshot;
+        }
+
         let metadata: FeedbackLogMetadata = {
           newestActivityAt: null,
           createdAts: new Map<string, string>(),
@@ -1314,15 +1336,16 @@ export async function refreshAgentFeedbackFromChain(
   }
 
   try {
+    if (wantsFullSnapshot) {
+      const fullSnapshotAgent = await buildFromFullSnapshot();
+      if (fullSnapshotAgent) {
+        return finalizeAgentFeedback(fullSnapshotAgent, feedbackFirst, overlayUris);
+      }
+    }
+
     const targetFeedbackIds = new Set(agent.feedback.map((item) => item.id));
     const overlay = await fetchFeedbackOverlay(network, agent.agentId, targetFeedbackIds);
     if (!overlay) {
-      if (wantsFullSnapshot) {
-        const fullSnapshotAgent = await buildFromFullSnapshot();
-        if (fullSnapshotAgent) {
-          return finalizeAgentFeedback(fullSnapshotAgent, feedbackFirst, overlayUris);
-        }
-      }
       return finalizeAgentFeedback(mergedAgent, feedbackFirst, overlayUris);
     }
 

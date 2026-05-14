@@ -5,6 +5,16 @@ import { getCurateFallbackAgentByAgentId } from "@/lib/curate-agent-fallback.ser
 import { getSepoliaIdentityRegistryFallbackAgentByAgentId } from "@/lib/identity-registry-fallback.server";
 
 const AGENT_DETAIL_TIMEOUT_MS = 8000;
+const FAST_AGENT_DETAIL_TIMEOUT_MS = 3000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+    return Promise.race([
+        promise,
+        new Promise<T>((resolve) => {
+            setTimeout(() => resolve(fallback), timeoutMs);
+        }),
+    ]);
+}
 
 function extractAgentIdCandidate(value: string): string | null {
     const trimmed = value.trim();
@@ -39,13 +49,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     try {
         if (fallbackAgentId) {
-            const curateFallback = await getCurateFallbackAgentByAgentId(fallbackAgentId, network, 10);
-            if (curateFallback?.agent) {
-                return NextResponse.json({ success: true, agent: curateFallback.agent, network });
-            }
-
             try {
-                const fallbackAgent = await getAgentByAgentId(fallbackAgentId, network, 10, !fresh);
+                const fallbackAgent = await withTimeout(
+                    getAgentByAgentId(fallbackAgentId, network, 10, !fresh),
+                    fresh ? AGENT_DETAIL_TIMEOUT_MS : FAST_AGENT_DETAIL_TIMEOUT_MS,
+                    null
+                );
                 if (fallbackAgent) {
                     return NextResponse.json({ success: true, agent: fallbackAgent, network });
                 }
@@ -53,8 +62,21 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
                 // Numeric fallback should not fail the whole request when the subgraph is unhealthy.
             }
 
+            const curateFallback = await withTimeout(
+                getCurateFallbackAgentByAgentId(fallbackAgentId, network, 10, { skipChainRefresh: !fresh }),
+                fresh ? AGENT_DETAIL_TIMEOUT_MS : FAST_AGENT_DETAIL_TIMEOUT_MS,
+                null
+            );
+            if (curateFallback?.agent) {
+                return NextResponse.json({ success: true, agent: curateFallback.agent, network });
+            }
+
             if (network === "sepolia") {
-                const onchainFallback = await getSepoliaIdentityRegistryFallbackAgentByAgentId(fallbackAgentId);
+                const onchainFallback = await withTimeout(
+                    getSepoliaIdentityRegistryFallbackAgentByAgentId(fallbackAgentId, { skipChainRefresh: !fresh }),
+                    fresh ? AGENT_DETAIL_TIMEOUT_MS : FAST_AGENT_DETAIL_TIMEOUT_MS,
+                    null
+                );
                 if (onchainFallback) {
                     return NextResponse.json({ success: true, agent: onchainFallback, network });
                 }
