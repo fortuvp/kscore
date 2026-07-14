@@ -6,12 +6,8 @@ import { ArrowLeft, FilePenLine } from "lucide-react";
 import { useParams, useSearchParams } from "next/navigation";
 
 import { CollateralizeAgentForm } from "@/components/pgtcr/collateralize-agent-form";
-import { InfoTooltip } from "@/components/info-tooltip";
 import { useVerificationEnvironment } from "@/components/verification-environment-provider";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  AGENT_SUBGRAPH_NETWORKS,
   AGENT_NETWORK_CHAIN_IDS,
   getAgentSubgraphLabel,
   isAgentSubgraphNetwork,
@@ -64,6 +60,13 @@ function SubmitAgentContent() {
   const [resolvedAgentId, setResolvedAgentId] = React.useState<string | null>(null);
   const [loadingAgent, setLoadingAgent] = React.useState(false);
   const [lookupError, setLookupError] = React.useState<string | null>(null);
+
+  const selectSourceNetwork = React.useCallback((nextNetwork: AgentSubgraphNetwork) => {
+    setNetwork(nextNetwork);
+    setAgent(null);
+    setResolvedAgentId(null);
+    setLookupError(null);
+  }, []);
 
   const loadAgent = React.useCallback(async (candidate: string, signal?: AbortSignal) => {
     const rawAgentId = candidate.trim();
@@ -131,40 +134,8 @@ function SubmitAgentContent() {
         </p>
       </header>
 
-      <section className="border-b border-border/60 py-6">
-        <div className="max-w-sm space-y-2">
-          <div className="flex items-center gap-2">
-            <Label>Agent&apos;s ERC-8004 network</Label>
-            <InfoTooltip label="About the agent network">
-              This is where the agent identity is registered. It is independent from the testnet or mainnet verification registry selected in the header.
-            </InfoTooltip>
-          </div>
-          <Select
-            value={network}
-            onValueChange={(value) => {
-              setNetwork(value as AgentSubgraphNetwork);
-              setAgent(null);
-              setResolvedAgentId(null);
-              setLookupError(null);
-            }}
-          >
-            <SelectTrigger className="w-full border-white/15 bg-[#0b1220] shadow-inner shadow-black/20 hover:border-white/25">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {AGENT_SUBGRAPH_NETWORKS.map((networkOption) => (
-                <SelectItem key={networkOption} value={networkOption}>
-                  {getAgentSubgraphLabel(networkOption)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {lookupError ? <p className="mt-4 text-sm text-red-300">{lookupError}</p> : null}
-      </section>
-
       <section className="py-7">
+        {lookupError ? <p className="mb-4 text-sm text-red-300">{lookupError}</p> : null}
         <CollateralizeAgentForm
           agentId={enteredAgentId}
           sourceNetwork={network}
@@ -172,6 +143,7 @@ function SubmitAgentContent() {
           autoFilledAgentId={resolvedAgentId}
           autoFillLoading={loadingAgent}
           onAutoFill={loadAgent}
+          onSourceNetworkChange={selectSourceNetwork}
           prefill={{
             agentURI: agent?.agentURI,
             owner: agent?.owner,

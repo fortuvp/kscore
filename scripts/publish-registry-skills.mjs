@@ -19,19 +19,6 @@ const checkOnly = process.argv.includes("--check");
 const skillNames = ["verified-agents-sepolia", "verified-agents-mainnet"];
 const klerosSkillsUrl = "https://skills.kleros.io/";
 const klerosSkillsSourceUrl = "https://github.com/kleros/kleros-skills";
-const siteUrl = normalizeSiteUrl(
-  process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000",
-);
-
-function normalizeSiteUrl(input) {
-  const url = new URL(input);
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("NEXT_PUBLIC_SITE_URL must use http or https");
-  }
-  url.hash = "";
-  url.search = "";
-  return url.toString().replace(/\/$/, "");
-}
 
 function sha256(buffer) {
   return createHash("sha256").update(buffer).digest("hex");
@@ -139,8 +126,8 @@ for (const name of skillNames) {
       name === "verified-agents-sepolia"
         ? "Verified Agents · Sepolia"
         : "Verified Agents · Mainnet",
-    skillUrl: `${siteUrl}/skills/${name}/SKILL.md`,
-    url: `${siteUrl}/skills/${name}.tar.gz`,
+    skillUrl: `/skills/${name}/SKILL.md`,
+    url: `/skills/${name}.tar.gz`,
     digest: `sha256:${sha256(archive)}`,
   });
   skillDocuments.push({
@@ -220,7 +207,7 @@ Ethereum mainnet registry (chain 1): 0x118155741eea23f56b3bd59b0c1342d5daaa6d07
 - Correct challengers may earn collateral; incorrect challengers can lose stake and incur fees. Read every amount and rule live.
 - After the live waiting period, a successfully finalized voluntary withdrawal returns 100% of the recorded ERC20 item stake and recorded native arbitration deposit. Gas/upload costs are excluded; disputes put recovery at risk.
 
-Discovery index: ${siteUrl}/.well-known/agent-skills/index.json
+Discovery index: /.well-known/agent-skills/index.json
 `;
 
 const llmsFullText = `${llmsText}
@@ -311,6 +298,6 @@ if (checkOnly) {
     await writeFile(destination, contents);
   }
   process.stdout.write(
-    `Published ${skillNames.length} registry skills for ${siteUrl}.\n`,
+    `Published ${skillNames.length} registry skills with deployment-relative URLs.\n`,
   );
 }

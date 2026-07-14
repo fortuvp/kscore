@@ -46,4 +46,17 @@ describe("requested UI copy and navigation", () => {
     expect(layout).toContain('href="/llms-full.txt"');
     expect(layout).toContain('rel="agent-skill"');
   });
+
+  it("publishes portable agent files and keeps one ERC-8004 source-chain selector", () => {
+    const llms = source("public/llms-full.txt");
+    const submitFlow = source("src/components/pgtcr/submit-agent-flow.tsx");
+    const submitForm = source("src/components/pgtcr/collateralize-agent-form.tsx");
+    const submissionBuilder = source("src/lib/pgtcr-submission.ts");
+
+    expect(llms).not.toContain("localhost");
+    expect(llms).toContain("/skills/verified-agents-mainnet/SKILL.md");
+    expect(submitFlow).not.toContain("Agent&apos;s ERC-8004 network");
+    expect(submissionBuilder).toContain('itemValues[key] = `eip155:${chain}:${address}`');
+    expect(submitForm).toContain('id="summary-title"');
+  });
 });

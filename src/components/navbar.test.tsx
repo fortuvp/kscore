@@ -23,7 +23,7 @@ describe("Navbar", () => {
     render(<Navbar />);
     const selectors = screen.getAllByLabelText("Verification registry network");
     expect(selectors).toHaveLength(2);
-    expect(selectors.every((selector) => selector.textContent?.includes("Testnet") && selector.textContent?.includes("Mainnet"))).toBe(true);
+    expect(selectors.every((selector) => selector.textContent === "Testnet")).toBe(true);
     expect(
       screen.getAllByRole("link", { name: "Explore" }).every((link) =>
         link.getAttribute("href")?.includes("verificationEnvironment=testnet")
@@ -41,5 +41,6 @@ describe("Navbar", () => {
     ).toBe(true);
     expect(screen.queryByRole("link", { name: "Source code" })).not.toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Primary navigation" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Primary navigation" })).not.toHaveClass("border");
   });
 });

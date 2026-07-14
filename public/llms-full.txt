@@ -15,8 +15,8 @@ Use the upstream package for operational Kleros mechanics. Use the DEX8004 skill
 
 ## Registry skills
 
-- [Verified Agents · Sepolia](http://localhost:3000/skills/verified-agents-sepolia/SKILL.md): Operate the permissionless Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum Sepolia for ERC-8004 submissions, inspection, challenges, evidence, appeals, and withdrawals. Always load the complete current Kleros Skills package for live PGTCR mechanics; use this overlay for fixed routing, source identity, policy checks, state labels, economics, and duplicate safeguards at 0x3162df9669affa8b6b6ff2147afa052249f00447. Installable bundle: http://localhost:3000/skills/verified-agents-sepolia.tar.gz
-- [Verified Agents · Mainnet](http://localhost:3000/skills/verified-agents-mainnet/SKILL.md): Operate the permissionless Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum mainnet for ERC-8004 submissions, inspection, challenges, evidence, appeals, and withdrawals. Always load the complete current Kleros Skills package for live PGTCR mechanics; use this overlay for fixed routing, source identity, policy checks, state labels, economics, and duplicate safeguards at 0x118155741eea23f56b3bd59b0c1342d5daaa6d07. Installable bundle: http://localhost:3000/skills/verified-agents-mainnet.tar.gz
+- [Verified Agents · Sepolia](/skills/verified-agents-sepolia/SKILL.md): Operate the permissionless Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum Sepolia for ERC-8004 submissions, inspection, challenges, evidence, appeals, and withdrawals. Always load the complete current Kleros Skills package for live PGTCR mechanics; use this overlay for fixed routing, source identity, policy checks, state labels, economics, and duplicate safeguards at 0x3162df9669affa8b6b6ff2147afa052249f00447. Installable bundle: /skills/verified-agents-sepolia.tar.gz
+- [Verified Agents · Mainnet](/skills/verified-agents-mainnet/SKILL.md): Operate the permissionless Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum mainnet for ERC-8004 submissions, inspection, challenges, evidence, appeals, and withdrawals. Always load the complete current Kleros Skills package for live PGTCR mechanics; use this overlay for fixed routing, source identity, policy checks, state labels, economics, and duplicate safeguards at 0x118155741eea23f56b3bd59b0c1342d5daaa6d07. Installable bundle: /skills/verified-agents-mainnet.tar.gz
 
 Sepolia registry (chain 11155111): 0x3162df9669affa8b6b6ff2147afa052249f00447
 Ethereum mainnet registry (chain 1): 0x118155741eea23f56b3bd59b0c1342d5daaa6d07
@@ -28,7 +28,7 @@ Ethereum mainnet registry (chain 1): 0x118155741eea23f56b3bd59b0c1342d5daaa6d07
 - Correct challengers may earn collateral; incorrect challengers can lose stake and incur fees. Read every amount and rule live.
 - After the live waiting period, a successfully finalized voluntary withdrawal returns 100% of the recorded ERC20 item stake and recorded native arbitration deposit. Gas/upload costs are excluded; disputes put recovery at risk.
 
-Discovery index: http://localhost:3000/.well-known/agent-skills/index.json
+Discovery index: /.well-known/agent-skills/index.json
 
 ---
 
@@ -53,8 +53,8 @@ These local skills follow the registry-context pattern demonstrated by [`scout-r
 
 Choose the verification registry independently from the ERC-8004 agent's source chain.
 
-- [Verified Agents · Sepolia](http://localhost:3000/skills/verified-agents-sepolia/SKILL.md) — Operate the permissionless Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum Sepolia for ERC-8004 submissions, inspection, challenges, evidence, appeals, and withdrawals. Always load the complete current Kleros Skills package for live PGTCR mechanics; use this overlay for fixed routing, source identity, policy checks, state labels, economics, and duplicate safeguards at 0x3162df9669affa8b6b6ff2147afa052249f00447. [Installable archive](http://localhost:3000/skills/verified-agents-sepolia.tar.gz).
-- [Verified Agents · Mainnet](http://localhost:3000/skills/verified-agents-mainnet/SKILL.md) — Operate the permissionless Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum mainnet for ERC-8004 submissions, inspection, challenges, evidence, appeals, and withdrawals. Always load the complete current Kleros Skills package for live PGTCR mechanics; use this overlay for fixed routing, source identity, policy checks, state labels, economics, and duplicate safeguards at 0x118155741eea23f56b3bd59b0c1342d5daaa6d07. [Installable archive](http://localhost:3000/skills/verified-agents-mainnet.tar.gz).
+- [Verified Agents · Sepolia](/skills/verified-agents-sepolia/SKILL.md) — Operate the permissionless Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum Sepolia for ERC-8004 submissions, inspection, challenges, evidence, appeals, and withdrawals. Always load the complete current Kleros Skills package for live PGTCR mechanics; use this overlay for fixed routing, source identity, policy checks, state labels, economics, and duplicate safeguards at 0x3162df9669affa8b6b6ff2147afa052249f00447. [Installable archive](/skills/verified-agents-sepolia.tar.gz).
+- [Verified Agents · Mainnet](/skills/verified-agents-mainnet/SKILL.md) — Operate the permissionless Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum mainnet for ERC-8004 submissions, inspection, challenges, evidence, appeals, and withdrawals. Always load the complete current Kleros Skills package for live PGTCR mechanics; use this overlay for fixed routing, source identity, policy checks, state labels, economics, and duplicate safeguards at 0x118155741eea23f56b3bd59b0c1342d5daaa6d07. [Installable archive](/skills/verified-agents-mainnet.tar.gz).
 
 ## Interpret the signal conservatively
 

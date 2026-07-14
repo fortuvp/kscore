@@ -33,10 +33,7 @@ export function Navbar() {
         <div className="relative hidden h-full items-center lg:flex">
           <Brand href={withEnvironment("/")} className="absolute left-0" />
 
-          <nav
-            aria-label="Primary navigation"
-            className="absolute left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-white/[0.07] bg-white/[0.025] p-1"
-          >
+          <nav aria-label="Primary navigation" className="absolute left-1/2 flex -translate-x-1/2 items-center gap-5">
             {PRIMARY_NAV_LINKS.map((link) => (
               <NavLink
                 key={link.href}
@@ -142,25 +139,36 @@ function VerificationEnvironmentSelector({
   onChange: (environment: VerificationEnvironment) => void;
   compact?: boolean;
 }) {
+  const label = environment === "mainnet" ? "Mainnet" : "Testnet";
   return (
-    <label className="relative inline-flex shrink-0 items-center">
-      <span className="sr-only">Verification registry network</span>
-      <select
-        aria-label="Verification registry network"
-        title="Verification registry network"
-        value={environment}
-        onChange={(event) => onChange(event.target.value as VerificationEnvironment)}
-        className={`h-8 appearance-none rounded-md border border-cyan-300/20 bg-cyan-300/[0.065] pl-2 pr-5 text-[11px] font-semibold text-cyan-100 outline-none transition hover:border-cyan-300/38 focus-visible:ring-2 focus-visible:ring-cyan-300/35 ${
-          compact ? "w-[4.8rem]" : "w-[5.35rem]"
-        }`}
-      >
-        <option value="testnet">Testnet</option>
-        <option value="mainnet">Mainnet</option>
-      </select>
-      <span aria-hidden className="pointer-events-none absolute right-1.5 text-[9px] text-cyan-200/58">
-        ▾
-      </span>
-    </label>
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="Verification registry network"
+          title="Change verification network"
+          className={`h-8 shrink-0 px-1.5 text-xs font-medium text-cyan-100/78 transition hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/35 ${
+            compact ? "min-w-[3.8rem]" : "min-w-[4.2rem]"
+          }`}
+        >
+          {label}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" sideOffset={8} className="w-40 border-white/10 bg-[#0a1018]/98 p-1.5 shadow-2xl">
+        {(["testnet", "mainnet"] as const).map((option) => (
+          <button
+            key={option}
+            type="button"
+            onClick={() => onChange(option)}
+            className={`flex h-9 w-full items-center rounded-md px-2.5 text-left text-xs font-medium transition ${
+              option === environment ? "bg-white/[0.08] text-white" : "text-white/55 hover:bg-white/[0.05] hover:text-white"
+            }`}
+          >
+            {option === "mainnet" ? "Mainnet" : "Testnet"}
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -181,8 +189,10 @@ function NavLink({
   return (
     <Link
       href={href}
-      className={`rounded-lg px-3 py-1.5 text-[13px] font-medium transition ${
-        active ? "bg-white/10 text-white shadow-sm" : "text-white/60 hover:bg-white/[0.055] hover:text-white"
+      className={`relative px-0.5 py-2 text-[13px] font-medium transition after:absolute after:inset-x-0 after:-bottom-[0.46rem] after:h-px after:origin-center after:bg-cyan-300 after:transition-transform ${
+        active
+          ? "text-white after:scale-x-100"
+          : "text-white/52 after:scale-x-0 hover:text-white/82 hover:after:scale-x-100"
       }`}
     >
       {children}

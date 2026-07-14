@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   allowance: undefined as bigint | undefined,
   tokenBalance: undefined as bigint | undefined,
   nativeBalance: undefined as bigint | undefined,
+  arbitrationCost: 25_000_000_000_000_000n as bigint | undefined,
   simulateContract: vi.fn(),
   waitForTransactionReceipt: vi.fn(),
   readContract: vi.fn(),
@@ -37,7 +38,7 @@ vi.mock("wagmi", () => ({
         : functionName === "symbol"
           ? "stETH"
           : functionName === "arbitrationCost"
-            ? 25_000_000_000_000_000n
+            ? mocks.arbitrationCost
             : functionName === "allowance"
               ? mocks.allowance
               : functionName === "balanceOf"
@@ -82,6 +83,7 @@ describe("CollateralizeAgentForm", () => {
     mocks.allowance = undefined;
     mocks.tokenBalance = undefined;
     mocks.nativeBalance = undefined;
+    mocks.arbitrationCost = 25_000_000_000_000_000n;
     mocks.refetch.mockReset().mockResolvedValue(undefined);
     mocks.uploadJsonToIpfs.mockReset().mockResolvedValue("ipfs://item");
     mocks.simulateContract.mockReset().mockImplementation(async (request) => ({ request }));
@@ -121,6 +123,7 @@ describe("CollateralizeAgentForm", () => {
               token: "0xae7ab96520de3a18e5e1115eaab095312d7fe84",
               tokenSymbol: "stETH",
               tokenDecimals: 18,
+              arbitrationCost: "25000000000000000",
               submissionMinDeposit: "20000000000000000",
               withdrawingPeriod: "43200",
               arbitrator: { id: "0x0000000000000000000000000000000000000001" },
@@ -135,6 +138,7 @@ describe("CollateralizeAgentForm", () => {
 
   it("uses tooltips, contrasted fields, and a live bottom summary without duplicated tips", async () => {
     const user = userEvent.setup();
+    mocks.arbitrationCost = undefined;
     render(
       <TooltipProvider>
         <CollateralizeAgentForm
@@ -153,22 +157,25 @@ describe("CollateralizeAgentForm", () => {
       </TooltipProvider>
     );
 
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Before you submit" })).toBeInTheDocument());
+    const summaryHeading = await screen.findByRole("heading", { name: "Summary" });
+    expect(summaryHeading.closest("section")).not.toHaveClass("bg-gradient-to-b");
     expect(screen.getByLabelText("About the agent number")).toBeInTheDocument();
-    expect(screen.getByLabelText("How auto-fill works")).toBeInTheDocument();
     expect(screen.getByLabelText("About policy review")).toBeInTheDocument();
     expect(screen.getByLabelText("About Agent URI")).toBeInTheDocument();
     expect(screen.queryByText("Verification network")).not.toBeInTheDocument();
     expect(screen.queryByText("Verification registry")).not.toBeInTheDocument();
     expect(screen.getByText("Collateralized stake")).toBeInTheDocument();
     expect(screen.getByText("Arbitration fee deposit")).toBeInTheDocument();
+    expect(screen.getAllByText("0.025 ETH").length).toBeGreaterThan(0);
     expect(screen.getByText("Due at submission")).toBeInTheDocument();
     expect(screen.getByText("100% refundable on voluntary withdrawal")).toBeInTheDocument();
     expect(screen.getByText(/Network gas is not refunded/)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /I have read the registry policy/i })).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Auto-fill" }).compareDocumentPosition(screen.getByLabelText("Agent number")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "How to boost" }));
     expect(screen.getByText("Stake more. Rank higher.")).toBeInTheDocument();
     expect(screen.getByText(/gain leaderboard visibility and attract more clients/)).toBeInTheDocument();
-    expect(screen.getByText(/Mainnet uses real stETH and ETH/)).toBeInTheDocument();
+    expect(screen.getByText(/Mainnet uses real funds/)).toBeInTheDocument();
     expect(screen.queryByText("tip")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Agent URI")).toHaveClass("bg-[#0b1220]");
   });
@@ -200,6 +207,7 @@ describe("CollateralizeAgentForm", () => {
     );
 
     const submitButton = await screen.findByRole("button", { name: "Submit on Ethereum" });
+    await user.click(screen.getByRole("checkbox", { name: /I have read the registry policy/i }));
     await waitFor(() => expect(submitButton).toBeEnabled());
     await user.click(submitButton);
 
@@ -257,6 +265,7 @@ describe("CollateralizeAgentForm", () => {
     );
 
     const submitButton = await screen.findByRole("button", { name: "Submit on Ethereum" });
+    await user.click(screen.getByRole("checkbox", { name: /I have read the registry policy/i }));
     await waitFor(() => expect(submitButton).toBeEnabled());
     await user.click(submitButton);
     await user.click(screen.getByRole("button", { name: "Start signing" }));

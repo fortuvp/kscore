@@ -173,7 +173,7 @@ The header’s Testnet/Mainnet selector controls only the Kleros verification re
 
 Use `PGTCR_SEPOLIA_*` and `PGTCR_MAINNET_*` for server overrides and the matching `NEXT_PUBLIC_PGTCR_*_REGISTRY_ADDRESS` settings for wallet-facing configuration. The older unsuffixed `PGTCR_REGISTRY_ADDRESS` and `PGTCR_GOLDSKY_SUBGRAPH_URL` settings remain Sepolia aliases.
 
-The registry-specific local LLM skills live under `skills/`. Run `npm run skills:publish` to generate the public bundles and discovery files with `NEXT_PUBLIC_SITE_URL`, or `npm run skills:check` to detect drift.
+The registry-specific local LLM skills live under `skills/`. Run `npm run skills:publish` to generate the public bundles and discovery files with deployment-relative URLs, or `npm run skills:check` to detect drift.
 
 ## Legacy Kleros Curate configuration
 

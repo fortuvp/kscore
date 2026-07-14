@@ -20,6 +20,10 @@ const ethereumRpcUrls = [
 ].filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index);
 
 const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
+const appOrigin =
+  typeof window !== "undefined" && window.location.origin !== "null"
+    ? window.location.origin
+    : process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://kleros.io";
 
 const connectors = [
   // Dedicated MetaMask connector avoids provider collisions when multiple injected wallets are installed.
@@ -36,8 +40,8 @@ const connectors = [
           metadata: {
             name: "DEX8004",
             description: "ERC-8004 Agents Explorer Demo",
-            url: "http://localhost:3000",
-            icons: ["http://localhost:3000/favicon.ico"],
+            url: appOrigin,
+            icons: [`${appOrigin}/favicon.ico`],
           },
         }),
       ]

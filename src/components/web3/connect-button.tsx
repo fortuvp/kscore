@@ -176,7 +176,9 @@ export function ConnectButton({ compact = false }: { compact?: boolean } = {}) {
     <Popover>
       <PopoverTrigger asChild>
         {compact ? (
-          <Button variant="outline" size="sm">Wallet</Button>
+          <Button variant="ghost" size="sm" className="px-2 font-mono text-xs text-white/75 hover:text-white">
+            {truncateAddress(address || "")}
+          </Button>
         ) : (
           <Button variant="outline" size="sm" className="gap-2">
             <span className="font-mono">{truncateAddress(address || "")}</span>

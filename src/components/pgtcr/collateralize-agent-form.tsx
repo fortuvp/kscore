@@ -22,7 +22,12 @@ import { formatEther, formatUnits, parseEventLogs } from "viem";
 import PermanentGTCRAbi from "@/lib/abi/PermanentGTCR.json";
 import { ERC20_ABI } from "@/lib/abi/erc20";
 import { IARBITRATOR_ABI } from "@/lib/abi/iArbitrator";
-import { getAgentSubgraphLabel, type AgentSubgraphNetwork } from "@/lib/agent-networks";
+import {
+  AGENT_NETWORK_CHAIN_IDS,
+  AGENT_SUBGRAPH_NETWORKS,
+  getAgentSubgraphLabel,
+  type AgentSubgraphNetwork,
+} from "@/lib/agent-networks";
 import { executeConfirmedTransaction } from "@/lib/confirmed-transaction";
 import { fetchIpfsJson, ipfsToGatewayUrl, uploadJsonToIpfs } from "@/lib/ipfs";
 import {
@@ -63,6 +68,7 @@ type RegistryApiResponse =
         token: string;
         tokenSymbol?: string | null;
         tokenDecimals?: number | null;
+        arbitrationCost?: string | null;
         submissionMinDeposit: string;
         withdrawingPeriod?: string;
         arbitrator: { id: string };
@@ -88,6 +94,7 @@ type CollateralizeAgentFormProps = {
   autoFilledAgentId?: string | null;
   autoFillLoading?: boolean;
   onAutoFill?: (agentId: string) => void | Promise<void>;
+  onSourceNetworkChange?: (network: AgentSubgraphNetwork) => void;
   onSubmitted?: () => void;
   onCancel?: () => void;
 };
@@ -95,26 +102,11 @@ type CollateralizeAgentFormProps = {
 const FORM_CONTROL_CLASS =
   "border-white/15 bg-[#0b1220] shadow-inner shadow-black/20 hover:border-white/25 focus-visible:border-cyan-400/60";
 
-const CAIP_EIP155_CHAIN_OPTIONS = [
-  { label: "Ethereum", chainId: 1 },
-  { label: "Sepolia", chainId: 11155111 },
-  { label: "Gnosis", chainId: 100 },
-  { label: "Arbitrum One", chainId: 42161 },
-  { label: "Optimism", chainId: 10 },
-  { label: "Moonbeam", chainId: 1284 },
-  { label: "MegaETH", chainId: 4326 },
-  { label: "PulseChain", chainId: 369 },
-  { label: "Avalanche C-Chain", chainId: 43114 },
-  { label: "Base", chainId: 8453 },
-  { label: "Linea", chainId: 59144 },
-  { label: "Scroll", chainId: 534352 },
-  { label: "Celo", chainId: 42220 },
-  { label: "Zk Sync", chainId: 324 },
-  { label: "Blast", chainId: 81457 },
-  { label: "Hyperliquid", chainId: 998 },
-  { label: "BSC", chainId: 56 },
-  { label: "Polygon", chainId: 137 },
-] as const;
+const CAIP_EIP155_CHAIN_OPTIONS = AGENT_SUBGRAPH_NETWORKS.map((network) => ({
+  network,
+  label: getAgentSubgraphLabel(network),
+  chainId: AGENT_NETWORK_CHAIN_IDS[network],
+}));
 
 function getPrefillChainId(value: string | number | null | undefined, fallbackChainId: number) {
   const raw = String(value || "").trim();
@@ -165,8 +157,10 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
   const [submissionPreview, setSubmissionPreview] = React.useState<SubmissionPreview | null>(null);
   const [signingPhase, setSigningPhase] = React.useState<SubmissionSigningPhase>("idle");
   const [signingError, setSigningError] = React.useState<string | null>(null);
+  const [policyConfirmed, setPolicyConfirmed] = React.useState(false);
 
   React.useEffect(() => setDraftAgentId(props.agentId), [props.agentId]);
+  React.useEffect(() => setPolicyConfirmed(false), [environment, policyUri]);
 
   const registryAddress = registry && registry.success ? (registry.registry.id as `0x${string}`) : undefined;
   const tokenAddress = registry && registry.success ? (registry.registry.token as `0x${string}`) : undefined;
@@ -291,7 +285,11 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
   const deposit = depositResult.value ?? 0n;
   const allowance = allowanceRead.data as bigint | undefined;
   const tokenBalance = tokenBalanceRead.data as bigint | undefined;
-  const arbitrationCost = arbitrationCostRead.data as bigint | undefined;
+  const arbitrationCost =
+    (arbitrationCostRead.data as bigint | undefined) ??
+    (registry && registry.success && registry.registry.arbitrationCost
+      ? BigInt(registry.registry.arbitrationCost)
+      : undefined);
   const needsApproval = Boolean(depositResult.value !== null && allowance !== undefined && allowance < deposit);
   const hasEnoughTokenBalance = tokenBalance === undefined || tokenBalance >= deposit;
   const hasEnoughNativeBalance =
@@ -518,27 +516,11 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
 
   return (
     <div className="space-y-7">
-      <div className="flex flex-col gap-3 rounded-lg border border-amber-400/25 bg-amber-500/10 p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-2 text-sm leading-relaxed text-amber-100/90">
-          <p>Review the registry policy and confirm that every editable field remains accurate before using real funds.</p>
-          <InfoTooltip label="About policy review">
-            The live registry policy defines compliance. Auto-fill and field validation only prepare a draft; they do not establish that the agent satisfies the policy.
-          </InfoTooltip>
-        </div>
-        {policyUri ? (
-          <Button asChild size="sm" variant="outline" className="shrink-0">
-            <a href={ipfsToGatewayUrl(policyUri)} target="_blank" rel="noreferrer">
-              Read policy <ExternalLink className="ml-2 h-3.5 w-3.5" />
-            </a>
-          </Button>
-        ) : null}
-      </div>
-
       <div className="space-y-2">
         <div className="flex items-center gap-2">
           <Label htmlFor="submission-agent-number">Agent number</Label>
           <InfoTooltip label="About the agent number">
-            Use the numeric ERC-8004 token ID on the agent network selected above.
+            Use the numeric ERC-8004 token ID on the network selected in the Owner field. Auto-fill loads an editable draft; you still need to review every value.
           </InfoTooltip>
           {hasCurrentAutoFill ? (
             <UiBadge className="border-emerald-500/30 bg-emerald-500/10 text-[10px] text-emerald-300">
@@ -546,32 +528,29 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
             </UiBadge>
           ) : null}
         </div>
-        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-2">
+          {props.onAutoFill ? (
+            <div className="flex items-center">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void props.onAutoFill?.(draftAgentId.trim())}
+                disabled={props.autoFillLoading || !/^\d+$/.test(draftAgentId.trim())}
+                className="min-w-28"
+              >
+                <WandSparkles className={`mr-2 h-4 w-4 ${props.autoFillLoading ? "animate-pulse" : ""}`} />
+                {props.autoFillLoading ? "Loading" : "Auto-fill"}
+              </Button>
+            </div>
+          ) : <span />}
           <Input
             id="submission-agent-number"
             inputMode="numeric"
             placeholder="ERC-8004 agent number"
             value={draftAgentId}
             onChange={(event) => setDraftAgentId(event.target.value)}
-            className={`${FORM_CONTROL_CLASS} font-mono`}
+            className={`${FORM_CONTROL_CLASS} min-w-0 font-mono`}
           />
-          {props.onAutoFill ? (
-            <div className="flex items-center gap-1">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void props.onAutoFill?.(draftAgentId.trim())}
-                disabled={props.autoFillLoading || !/^\d+$/.test(draftAgentId.trim())}
-                className="min-w-40"
-              >
-                <WandSparkles className={`mr-2 h-4 w-4 ${props.autoFillLoading ? "animate-pulse" : ""}`} />
-                {props.autoFillLoading ? "Loading" : "Auto-fill"}
-              </Button>
-              <InfoTooltip label="How auto-fill works">
-                Auto-fill creates an editable draft from indexed and on-chain registration data. It does not prove that the agent complies with the policy; you remain responsible for reviewing every field.
-              </InfoTooltip>
-            </div>
-          ) : null}
         </div>
       </div>
 
@@ -588,8 +567,12 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
             {isPgtcrAddressColumn(column) ? (
               <div className="grid gap-2 sm:grid-cols-[180px_1fr]">
                 <Select
-                  value={values[`${key}__chain`] || String(props.sourceChainId)}
-                  onValueChange={(value) => setValues((previous) => ({ ...previous, [`${key}__chain`]: value }))}
+                  value={values[`${key}__chain`] || String(AGENT_NETWORK_CHAIN_IDS[props.sourceNetwork])}
+                  onValueChange={(value) => {
+                    setValues((previous) => ({ ...previous, [`${key}__chain`]: value }));
+                    const option = CAIP_EIP155_CHAIN_OPTIONS.find((candidate) => String(candidate.chainId) === value);
+                    if (option) props.onSourceNetworkChange?.(option.network);
+                  }}
                 >
                   <SelectTrigger className={`w-full ${FORM_CONTROL_CLASS}`}>
                     <SelectValue placeholder="Chain" />
@@ -685,9 +668,9 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
         </p>
       </div>
 
-      <section className="space-y-4 rounded-2xl border border-cyan-400/20 bg-gradient-to-b from-cyan-500/[0.08] to-cyan-500/[0.025] p-5 sm:p-6" aria-labelledby="before-submit-title">
+      <section className="space-y-4 border-t border-white/[0.08] pt-6" aria-labelledby="summary-title">
         <div>
-          <h2 id="before-submit-title" className="font-semibold text-cyan-100">Before you submit</h2>
+          <h2 id="summary-title" className="font-semibold text-white">Summary</h2>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             Review the two assets posted to Stake Curate. They remain separate and keep their own token units.
           </p>
@@ -726,10 +709,42 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
             </p>
           </div>
         </div>
-        {environment === "mainnet" ? (
-          <div className="rounded-lg border border-red-400/30 bg-red-500/10 p-3 text-xs font-medium leading-relaxed text-red-100">
-            Mainnet uses real {resolvedTokenSymbol} and ETH. Simulate, verify every value, and confirm the selected wallet before signing.
+        <div className="flex items-start gap-3 rounded-lg border border-white/10 bg-white/[0.02] p-3">
+          <input
+            id="policy-confirmation"
+            type="checkbox"
+            checked={policyConfirmed}
+            onChange={(event) => setPolicyConfirmed(event.target.checked)}
+            disabled={!policyUri}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-cyan-300"
+          />
+          <div className="min-w-0 text-xs leading-5 text-white/52">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <label htmlFor="policy-confirmation" className="cursor-pointer font-medium text-white/72">
+                I have read the registry policy and reviewed every field.
+              </label>
+              {policyUri ? (
+                <a
+                  href={ipfsToGatewayUrl(policyUri)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-cyan-200 transition hover:text-cyan-100 hover:underline hover:underline-offset-2"
+                >
+                  Read policy
+                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                </a>
+              ) : null}
+              <InfoTooltip label="About policy review">
+                Auto-fill only prepares a draft. The live policy defines compliance, and you remain responsible for every submitted value.
+              </InfoTooltip>
+            </div>
           </div>
+        </div>
+        {environment === "mainnet" ? (
+          <p className="text-xs leading-relaxed text-white/42">
+            <span className="font-semibold text-white/62">Mainnet uses real funds.</span>{" "}
+            Verify every value and the selected wallet before signing with {resolvedTokenSymbol} and ETH.
+          </p>
         ) : null}
       </section>
 
@@ -743,6 +758,7 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
             !columns?.length ||
             arbitrationCost === undefined ||
             allowance === undefined ||
+            !policyConfirmed ||
             Boolean(depositResult.error) ||
             balanceIssues.length > 0 ||
             Boolean(props.onAutoFill && !hasCurrentAutoFill)
