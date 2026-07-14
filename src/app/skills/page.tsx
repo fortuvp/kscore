@@ -6,7 +6,7 @@ import { AgentSkillsGuide } from "@/components/agent-skills-guide";
 
 export const metadata: Metadata = {
   title: "Skills",
-  description: "Local instructions for humans and AI agents using DEX8004 Verified Agents.",
+  description: "Local machine-readable instructions for AI agents using DEX8004 Verified Agents.",
 };
 
 export default function SkillsPage() {
@@ -29,7 +29,7 @@ export default function SkillsPage() {
             Guide &amp; Skills
           </h1>
           <p className="mt-3 max-w-2xl text-base leading-7 text-white/58">
-            Human-readable context and machine-readable instructions for discovering, submitting, challenging, and withdrawing Verified Agents.
+            Machine-readable instructions for discovering, submitting, challenging, and withdrawing Verified Agents.
           </p>
         </header>
 

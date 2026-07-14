@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Bot, Menu } from "lucide-react";
+import { Bot, ChevronDown, Menu } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -147,11 +147,12 @@ function VerificationEnvironmentSelector({
           type="button"
           aria-label="Verification registry network"
           title="Change verification network"
-          className={`h-8 shrink-0 px-1.5 text-xs font-medium text-cyan-100/78 transition hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/35 ${
+          className={`inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-md px-2 text-xs font-medium text-cyan-100/78 transition hover:bg-white/[0.05] hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/35 ${
             compact ? "min-w-[3.8rem]" : "min-w-[4.2rem]"
           }`}
         >
-          {label}
+          <span>{label}</span>
+          <ChevronDown className="h-3 w-3 text-cyan-100/48" aria-hidden="true" />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={8} className="w-40 border-white/10 bg-[#0a1018]/98 p-1.5 shadow-2xl">

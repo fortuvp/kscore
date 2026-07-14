@@ -83,8 +83,8 @@ type RegistryApiResponse =
 
 type CollateralizeAgentFormProps = {
   agentId: string;
-  sourceNetwork: AgentSubgraphNetwork;
-  sourceChainId: number;
+  sourceNetwork: AgentSubgraphNetwork | null;
+  sourceChainId?: number;
   prefill?: {
     agentURI?: string | null;
     owner?: string | null;
@@ -108,12 +108,13 @@ const CAIP_EIP155_CHAIN_OPTIONS = AGENT_SUBGRAPH_NETWORKS.map((network) => ({
   chainId: AGENT_NETWORK_CHAIN_IDS[network],
 }));
 
-function getPrefillChainId(value: string | number | null | undefined, fallbackChainId: number) {
+function getPrefillChainId(value: string | number | null | undefined, fallbackChainId?: number) {
   const raw = String(value || "").trim();
-  if (!raw) return String(fallbackChainId);
-  if (raw.startsWith("eip155:")) return raw.split(":")[1] || String(fallbackChainId);
+  const fallback = fallbackChainId ? String(fallbackChainId) : "";
+  if (!raw) return fallback;
+  if (raw.startsWith("eip155:")) return raw.split(":")[1] || fallback;
   const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? String(parsed) : String(fallbackChainId);
+  return Number.isFinite(parsed) && parsed > 0 ? String(parsed) : fallback;
 }
 
 function getPrefillTextValue(
@@ -252,7 +253,9 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
           const key = normalizePgtcrColumnKey(column.label);
           initial[key] = getPrefillTextValue(column.label, prefill);
           if (isPgtcrAddressColumn(column)) {
-            initial[`${key}__chain`] = getPrefillChainId(prefill?.chainId, props.sourceChainId);
+            initial[`${key}__chain`] = props.sourceChainId
+              ? String(props.sourceChainId)
+              : getPrefillChainId(prefill?.chainId);
             initial[`${key}__address`] = prefill?.owner?.trim() || "";
           }
         }
@@ -330,6 +333,7 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
   }
 
   async function confirmNoDuplicate(agentId: string) {
+    if (!props.sourceNetwork) throw new Error("Choose the agent network first.");
     const query = new URLSearchParams({
       agentId,
       network: props.sourceNetwork,
@@ -380,6 +384,10 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
     }
     if (!columns?.length) {
       toast.error("Registry schema columns are unavailable.");
+      return null;
+    }
+    if (!props.sourceNetwork || !props.sourceChainId) {
+      toast.error("Choose the agent network.");
       return null;
     }
 
@@ -503,7 +511,7 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
   }
 
   const hasCurrentAutoFill = Boolean(
-    draftAgentId.trim() && props.autoFilledAgentId === draftAgentId.trim()
+    props.sourceNetwork && draftAgentId.trim() && props.autoFilledAgentId === draftAgentId.trim()
   );
   const balanceIssues = [
     isConnected && onRequiredChain && !hasEnoughTokenBalance
@@ -520,7 +528,7 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
         <div className="flex items-center gap-2">
           <Label htmlFor="submission-agent-number">Agent number</Label>
           <InfoTooltip label="About the agent number">
-            Use the numeric ERC-8004 token ID on the network selected in the Owner field. Auto-fill loads an editable draft; you still need to review every value.
+            Select the ERC-8004 network, then enter its numeric agent token ID. Auto-fill loads an editable draft; you still need to review every value.
           </InfoTooltip>
           {hasCurrentAutoFill ? (
             <UiBadge className="border-emerald-500/30 bg-emerald-500/10 text-[10px] text-emerald-300">
@@ -528,21 +536,22 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
             </UiBadge>
           ) : null}
         </div>
-        <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-2">
-          {props.onAutoFill ? (
-            <div className="flex items-center">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void props.onAutoFill?.(draftAgentId.trim())}
-                disabled={props.autoFillLoading || !/^\d+$/.test(draftAgentId.trim())}
-                className="min-w-28"
-              >
-                <WandSparkles className={`mr-2 h-4 w-4 ${props.autoFillLoading ? "animate-pulse" : ""}`} />
-                {props.autoFillLoading ? "Loading" : "Auto-fill"}
-              </Button>
-            </div>
-          ) : <span />}
+        <div className="grid grid-cols-[8.5rem_minmax(0,1fr)] gap-2 sm:grid-cols-[10rem_minmax(0,1fr)_auto]">
+          <Select
+            value={props.sourceNetwork || undefined}
+            onValueChange={(value) => props.onSourceNetworkChange?.(value as AgentSubgraphNetwork)}
+          >
+            <SelectTrigger aria-label="Agent network" className={`w-full ${FORM_CONTROL_CLASS}`}>
+              <SelectValue placeholder="Network" />
+            </SelectTrigger>
+            <SelectContent className="z-[60]">
+              {CAIP_EIP155_CHAIN_OPTIONS.map((option) => (
+                <SelectItem key={option.network} value={option.network}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Input
             id="submission-agent-number"
             inputMode="numeric"
@@ -551,6 +560,18 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
             onChange={(event) => setDraftAgentId(event.target.value)}
             className={`${FORM_CONTROL_CLASS} min-w-0 font-mono`}
           />
+          {props.onAutoFill ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void props.onAutoFill?.(draftAgentId.trim())}
+              disabled={props.autoFillLoading || !props.sourceNetwork || !/^\d+$/.test(draftAgentId.trim())}
+              className="col-span-2 min-w-28 sm:col-span-1"
+            >
+              <WandSparkles className={`mr-2 h-4 w-4 ${props.autoFillLoading ? "animate-pulse" : ""}`} />
+              {props.autoFillLoading ? "Loading" : "Auto-fill"}
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -565,36 +586,15 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
               </InfoTooltip>
             </div>
             {isPgtcrAddressColumn(column) ? (
-              <div className="grid gap-2 sm:grid-cols-[180px_1fr]">
-                <Select
-                  value={values[`${key}__chain`] || String(AGENT_NETWORK_CHAIN_IDS[props.sourceNetwork])}
-                  onValueChange={(value) => {
-                    setValues((previous) => ({ ...previous, [`${key}__chain`]: value }));
-                    const option = CAIP_EIP155_CHAIN_OPTIONS.find((candidate) => String(candidate.chainId) === value);
-                    if (option) props.onSourceNetworkChange?.(option.network);
-                  }}
-                >
-                  <SelectTrigger className={`w-full ${FORM_CONTROL_CLASS}`}>
-                    <SelectValue placeholder="Chain" />
-                  </SelectTrigger>
-                  <SelectContent className="z-[60]">
-                    {CAIP_EIP155_CHAIN_OPTIONS.map((option) => (
-                      <SelectItem key={option.chainId} value={String(option.chainId)}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Input
-                  aria-label={`${column.label} address`}
-                  placeholder="0x…"
-                  value={values[`${key}__address`] || ""}
-                  onChange={(event) =>
-                    setValues((previous) => ({ ...previous, [`${key}__address`]: event.target.value }))
-                  }
-                  className={FORM_CONTROL_CLASS}
-                />
-              </div>
+              <Input
+                aria-label={`${column.label} address`}
+                placeholder="0x…"
+                value={values[`${key}__address`] || ""}
+                onChange={(event) =>
+                  setValues((previous) => ({ ...previous, [`${key}__address`]: event.target.value }))
+                }
+                className={FORM_CONTROL_CLASS}
+              />
             ) : (
               <Input
                 aria-label={column.label}
@@ -705,7 +705,7 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
           <div>
             <p className="font-semibold text-emerald-100">100% refundable on voluntary withdrawal</p>
             <p className="mt-1">
-              If no challenge succeeds, the contract returns both your {resolvedTokenSymbol} stake and ETH arbitration deposit after the {registry && registry.success ? formatPeriod(registry.registry.withdrawingPeriod) : "live"} waiting period and final withdrawal transaction. The listing remains challengeable while you wait. Network gas is not refunded.
+              If no challenge succeeds and your entry remains compliant, you can remove it from the registry at any time. After the {registry && registry.success ? formatPeriod(registry.registry.withdrawingPeriod) : "registry's live"} waiting period and final withdrawal transaction, the contract returns both your {resolvedTokenSymbol} stake and ETH arbitration deposit. The listing remains challengeable while you wait. Network gas is not refunded.
             </p>
           </div>
         </div>
@@ -738,6 +738,9 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
                 Auto-fill only prepares a draft. The live policy defines compliance, and you remain responsible for every submitted value.
               </InfoTooltip>
             </div>
+            <p className="mt-1 text-white/42">
+              Make sure your submission complies with the listing criteria to avoid challenges and loss of funds.
+            </p>
           </div>
         </div>
         {environment === "mainnet" ? (
@@ -759,6 +762,7 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
             arbitrationCost === undefined ||
             allowance === undefined ||
             !policyConfirmed ||
+            !props.sourceNetwork ||
             Boolean(depositResult.error) ||
             balanceIssues.length > 0 ||
             Boolean(props.onAutoFill && !hasCurrentAutoFill)
@@ -790,7 +794,7 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
         }}
         preview={submissionPreview}
         columns={columns || []}
-        agentNetwork={getAgentSubgraphLabel(props.sourceNetwork)}
+        agentNetwork={props.sourceNetwork ? getAgentSubgraphLabel(props.sourceNetwork) : "Not selected"}
         submitter={address}
         tokenSymbol={resolvedTokenSymbol}
         tokenDecimals={resolvedTokenDecimals}

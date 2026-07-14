@@ -52,8 +52,8 @@ function SubmitAgentContent() {
     return value === "new" ? "" : value;
   }, [params?.agentId]);
   const requestedNetwork = searchParams.get("network");
-  const [network, setNetwork] = React.useState<AgentSubgraphNetwork>(
-    isAgentSubgraphNetwork(requestedNetwork) ? requestedNetwork : "sepolia"
+  const [network, setNetwork] = React.useState<AgentSubgraphNetwork | null>(
+    isAgentSubgraphNetwork(requestedNetwork) ? requestedNetwork : null
   );
   const [agent, setAgent] = React.useState<Agent | null>(null);
   const [enteredAgentId, setEnteredAgentId] = React.useState(routeAgentId);
@@ -69,6 +69,12 @@ function SubmitAgentContent() {
   }, []);
 
   const loadAgent = React.useCallback(async (candidate: string, signal?: AbortSignal) => {
+    if (!network) {
+      setLookupError("Choose the agent network first.");
+      setAgent(null);
+      setResolvedAgentId(null);
+      return;
+    }
     const rawAgentId = candidate.trim();
     if (!/^\d+$/.test(rawAgentId)) {
       setLookupError("Enter a valid numeric agent number.");
@@ -110,12 +116,12 @@ function SubmitAgentContent() {
   }, [environment, network]);
 
   React.useEffect(() => {
-    if (!routeAgentId) return;
+    if (!routeAgentId || !network) return;
     setEnteredAgentId(routeAgentId);
     const controller = new AbortController();
     void loadAgent(routeAgentId, controller.signal);
     return () => controller.abort();
-  }, [loadAgent, routeAgentId]);
+  }, [loadAgent, network, routeAgentId]);
 
   return (
     <div className="container mx-auto max-w-4xl px-4 py-10 sm:px-6">
@@ -139,7 +145,7 @@ function SubmitAgentContent() {
         <CollateralizeAgentForm
           agentId={enteredAgentId}
           sourceNetwork={network}
-          sourceChainId={AGENT_NETWORK_CHAIN_IDS[network]}
+          sourceChainId={network ? AGENT_NETWORK_CHAIN_IDS[network] : undefined}
           autoFilledAgentId={resolvedAgentId}
           autoFillLoading={loadingAgent}
           onAutoFill={loadAgent}

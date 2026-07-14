@@ -24,6 +24,7 @@ describe("Navbar", () => {
     const selectors = screen.getAllByLabelText("Verification registry network");
     expect(selectors).toHaveLength(2);
     expect(selectors.every((selector) => selector.textContent === "Testnet")).toBe(true);
+    expect(selectors.every((selector) => selector.querySelector("svg"))).toBe(true);
     expect(
       screen.getAllByRole("link", { name: "Explore" }).every((link) =>
         link.getAttribute("href")?.includes("verificationEnvironment=testnet")

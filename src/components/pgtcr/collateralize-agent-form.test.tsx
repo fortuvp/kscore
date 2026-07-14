@@ -169,9 +169,13 @@ describe("CollateralizeAgentForm", () => {
     expect(screen.getAllByText("0.025 ETH").length).toBeGreaterThan(0);
     expect(screen.getByText("Due at submission")).toBeInTheDocument();
     expect(screen.getByText("100% refundable on voluntary withdrawal")).toBeInTheDocument();
+    expect(screen.getByText(/you can remove it from the registry at any time/i)).toBeInTheDocument();
+    expect(screen.getByText(/After the 12h waiting period/i)).toBeInTheDocument();
     expect(screen.getByText(/Network gas is not refunded/)).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /I have read the registry policy/i })).not.toBeChecked();
-    expect(screen.getByRole("button", { name: "Auto-fill" }).compareDocumentPosition(screen.getByLabelText("Agent number")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText(/Make sure your submission complies with the listing criteria/i)).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Agent network" }).compareDocumentPosition(screen.getByLabelText("Agent number")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getAllByRole("combobox")).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "How to boost" }));
     expect(screen.getByText("Stake more. Rank higher.")).toBeInTheDocument();
     expect(screen.getByText(/gain leaderboard visibility and attract more clients/)).toBeInTheDocument();
@@ -230,6 +234,31 @@ describe("CollateralizeAgentForm", () => {
       value: 25_000_000_000_000_000n,
     });
     expect(mocks.writeContractAsync).toHaveBeenCalledTimes(2);
+    expect(mocks.uploadJsonToIpfs.mock.calls[0][0]).toMatchObject({
+      values: {
+        Owner: "eip155:1:0x0000000000000000000000000000000000000001",
+      },
+    });
+  });
+
+  it("keeps auto-fill and editable fields blank until a network and agent number are selected", async () => {
+    render(
+      <TooltipProvider>
+        <CollateralizeAgentForm
+          agentId=""
+          sourceNetwork={null}
+          autoFilledAgentId={null}
+          onAutoFill={vi.fn()}
+          prefill={{}}
+        />
+      </TooltipProvider>
+    );
+
+    expect(await screen.findByRole("combobox", { name: "Agent network" })).toHaveTextContent("Network");
+    expect(screen.getByLabelText("Agent number")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Auto-fill" })).toBeDisabled();
+    expect(screen.getByLabelText("Agent URI")).toHaveValue("");
+    expect(screen.getByLabelText("Owner address")).toHaveValue("");
   });
 
   it("keeps a confirmed approval when the submission signature is retried", async () => {
