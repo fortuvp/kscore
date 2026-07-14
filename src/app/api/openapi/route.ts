@@ -17,6 +17,7 @@ export async function GET() {
             { name: "pageSize", in: "query", schema: { type: "integer" } },
             { name: "q", in: "query", schema: { type: "string" } },
             { name: "network", in: "query", schema: { type: "string" } },
+            { name: "verificationEnvironment", in: "query", schema: { type: "string", enum: ["testnet", "mainnet"] } },
             { name: "sort", in: "query", schema: { type: "string" } },
             { name: "protocol", in: "query", schema: { type: "string" } },
           ],
@@ -61,11 +62,21 @@ export async function GET() {
           summary: "Get Kleros Curate verification status for an agent",
           parameters: [
             { name: "agentId", in: "query", schema: { type: "string" } },
-            { name: "chainId", in: "query", schema: { type: "integer" } },
+            { name: "network", in: "query", schema: { type: "string" } },
+            { name: "verificationEnvironment", in: "query", schema: { type: "string", enum: ["testnet", "mainnet"] } },
+          ],
+        },
+      },
+      "/api/agents/history": {
+        get: {
+          summary: "Get normalized ERC-8004 and PGTCR history for an agent",
+          parameters: [
+            { name: "agentId", in: "query", schema: { type: "string" } },
+            { name: "network", in: "query", schema: { type: "string" } },
+            { name: "verificationEnvironment", in: "query", schema: { type: "string", enum: ["testnet", "mainnet"] } },
           ],
         },
       },
     },
   });
 }
-

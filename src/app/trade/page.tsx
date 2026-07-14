@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function TradePage() {
-  redirect("/marketplace");
+  redirect("/my-agents");
 }

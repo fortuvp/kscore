@@ -1,7 +1,6 @@
 export const SEPOLIA_CHAIN_ID = 11155111;
 
 const PUBLIC_ADDRESSES = {
-  NEXT_PUBLIC_ESCROW_ADDRESS: process.env.NEXT_PUBLIC_ESCROW_ADDRESS,
   NEXT_PUBLIC_REALITY_PROXY_ADDRESS: process.env.NEXT_PUBLIC_REALITY_PROXY_ADDRESS,
   NEXT_PUBLIC_CURATE_REGISTRY_ADDRESS: process.env.NEXT_PUBLIC_CURATE_REGISTRY_ADDRESS,
   NEXT_PUBLIC_AGENT_REGISTRY_SEPOLIA_ADDRESS: process.env.NEXT_PUBLIC_AGENT_REGISTRY_SEPOLIA_ADDRESS,
@@ -12,8 +11,6 @@ function requireAddress(name: keyof typeof PUBLIC_ADDRESSES): `0x${string}` {
   if (!value) throw new Error(`Missing env var ${name}`);
   return value as `0x${string}`;
 }
-
-export const ESCROW_ADDRESS = requireAddress("NEXT_PUBLIC_ESCROW_ADDRESS");
 
 export const REALITY_PROXY_ADDRESS = requireAddress("NEXT_PUBLIC_REALITY_PROXY_ADDRESS");
 

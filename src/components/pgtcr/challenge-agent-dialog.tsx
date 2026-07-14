@@ -2,19 +2,20 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { useAccount, useBalance, useChainId, useReadContract, useWriteContract } from "wagmi";
-import { sepolia } from "wagmi/chains";
+import { useAccount, useBalance, useChainId, usePublicClient, useReadContract, useWriteContract } from "wagmi";
 import { formatEther, formatUnits } from "viem";
 
 import PermanentGTCRAbi from "@/lib/abi/PermanentGTCR.json";
 import { ERC20_ABI } from "@/lib/abi/erc20";
 import { IARBITRATOR_ABI } from "@/lib/abi/iArbitrator";
+import { executeConfirmedTransaction } from "@/lib/confirmed-transaction";
 import { uploadFileToIpfs, uploadJsonToIpfs } from "@/lib/ipfs";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useVerificationEnvironment } from "@/components/verification-environment-provider";
 
 type RegistryApiResponse =
   | {
@@ -69,8 +70,10 @@ function mulDiv(a: bigint, b: bigint, div: bigint): bigint {
 }
 
 export function ChallengeAgentDialog(props: { itemID: string }) {
+  const { environment, deployment } = useVerificationEnvironment();
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
+  const publicClient = usePublicClient({ chainId: deployment.chainId });
   const { writeContractAsync } = useWriteContract();
 
   const [open, setOpen] = React.useState(false);
@@ -83,7 +86,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
   const [description, setDescription] = React.useState("");
   const [file, setFile] = React.useState<File | null>(null);
 
-  const onSepolia = chainId === sepolia.id;
+  const onRequiredChain = chainId === deployment.chainId;
 
   const registryAddress = registry && registry.success ? (registry.registry.id as `0x${string}`) : undefined;
   const tokenAddress = registry && registry.success ? (registry.registry.token as `0x${string}`) : undefined;
@@ -91,6 +94,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
   const arbitratorExtraData = registry && registry.success ? (registry.registry.arbitrationSettings?.[0]?.arbitratorExtraData as `0x${string}`) : undefined;
 
   const multiplierDivisor = useReadContract({
+    chainId: deployment.chainId,
     address: registryAddress,
     abi: PermanentGTCRAbi,
     functionName: "MULTIPLIER_DIVISOR",
@@ -98,6 +102,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
   }).data as bigint | undefined;
 
   const tokenDecimals = useReadContract({
+    chainId: deployment.chainId,
     address: tokenAddress,
     abi: ERC20_ABI,
     functionName: "decimals",
@@ -105,6 +110,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
   }).data as number | undefined;
 
   const tokenSymbol = useReadContract({
+    chainId: deployment.chainId,
     address: tokenAddress,
     abi: ERC20_ABI,
     functionName: "symbol",
@@ -114,6 +120,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
   const resolvedTokenSymbol = tokenSymbol || (registry && registry.success ? registry.registry.tokenSymbol || undefined : undefined) || "TOKEN";
 
   const arbitrationCost = useReadContract({
+    chainId: deployment.chainId,
     address: arbitratorAddress,
     abi: IARBITRATOR_ABI,
     functionName: "arbitrationCost",
@@ -129,15 +136,18 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
     return mulDiv(itemStake, challengeStakeMultiplier, multiplierDivisor);
   }, [itemStake, challengeStakeMultiplier, multiplierDivisor]);
 
-  const allowance = useReadContract({
+  const allowanceRead = useReadContract({
+    chainId: deployment.chainId,
     address: tokenAddress,
     abi: ERC20_ABI,
     functionName: "allowance",
     args: address && registryAddress ? [address, registryAddress] : undefined,
     query: { enabled: Boolean(address && tokenAddress && registryAddress) },
-  }).data as bigint | undefined;
+  });
+  const allowance = allowanceRead.data as bigint | undefined;
 
   const tokenBalance = useReadContract({
+    chainId: deployment.chainId,
     address: tokenAddress,
     abi: ERC20_ABI,
     functionName: "balanceOf",
@@ -147,7 +157,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
 
   const nativeBalance = useBalance({
     address,
-    chainId: sepolia.id,
+    chainId: deployment.chainId,
     query: { enabled: Boolean(address) },
   }).data?.value;
 
@@ -162,9 +172,11 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
     let cancelled = false;
     async function load() {
       try {
+        const query = new URLSearchParams({ verificationEnvironment: environment });
+        const itemQuery = new URLSearchParams({ itemID: props.itemID, verificationEnvironment: environment });
         const [rRes, iRes] = await Promise.all([
-          fetch("/api/pgtcr/registry", { cache: "no-store" }),
-          fetch(`/api/pgtcr/item?itemID=${encodeURIComponent(props.itemID)}`, { cache: "no-store" }),
+          fetch(`/api/pgtcr/registry?${query}`, { cache: "no-store" }),
+          fetch(`/api/pgtcr/item?${itemQuery}`, { cache: "no-store" }),
         ]);
         const [rJson, iJson] = await Promise.all([
           rRes.json() as Promise<RegistryApiResponse>,
@@ -181,20 +193,30 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
     return () => {
       cancelled = true;
     };
-  }, [open, props.itemID]);
+  }, [environment, open, props.itemID]);
 
   async function ensureApprovalIfNeeded() {
     if (!needsApproval || approvalStepDone) return true;
-    if (!tokenAddress || !registryAddress) return false;
+    if (!publicClient || !address || !tokenAddress || !registryAddress) return false;
     setSubmitting(true);
     try {
-      await writeContractAsync({
-        address: tokenAddress,
-        abi: ERC20_ABI,
-        functionName: "approve",
-        args: [registryAddress, requiredChallengeStake],
+      toast.message("Checking approval and waiting for confirmation…");
+      await executeConfirmedTransaction({
+        simulate: async () =>
+          (
+            await publicClient.simulateContract({
+              account: address,
+              address: tokenAddress,
+              abi: ERC20_ABI,
+              functionName: "approve",
+              args: [registryAddress, requiredChallengeStake],
+            })
+          ).request,
+        write: (request) => writeContractAsync(request),
+        wait: (hash) => publicClient.waitForTransactionReceipt({ hash }),
       });
-      toast.success("Approval sent. Click again to submit challenge.");
+      await allowanceRead.refetch();
+      toast.success("Approval confirmed. You can now submit the challenge.");
       setApprovalStepDone(true);
       return true;
     } catch (e) {
@@ -210,11 +232,11 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
       toast.error("Connect your wallet to challenge.");
       return;
     }
-    if (!onSepolia) {
-      toast.error("Switch to Sepolia.");
+    if (!onRequiredChain) {
+      toast.error(`Switch to ${deployment.chainName}.`);
       return;
     }
-    if (!registryAddress) {
+    if (!publicClient || !registryAddress) {
       toast.error("Registry not loaded.");
       return;
     }
@@ -266,16 +288,23 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
 
       const evidenceUri = await uploadJsonToIpfs(evidenceJson, { operation: "evidence", pinToGraph: false });
 
-      await writeContractAsync({
-        address: registryAddress,
-        abi: PermanentGTCRAbi,
-        functionName: "challengeItem",
-        args: [props.itemID as `0x${string}`, evidenceUri],
-        value: arbitrationCost,
-        gas: 500000n,
+      toast.message("Checking challenge and waiting for confirmation…");
+      await executeConfirmedTransaction({
+        simulate: async () =>
+          (
+            await publicClient.simulateContract({
+              account: address,
+              address: registryAddress,
+              abi: PermanentGTCRAbi,
+              functionName: "challengeItem",
+              args: [props.itemID as `0x${string}`, evidenceUri],
+              value: arbitrationCost,
+            })
+          ).request,
+        write: (request) => writeContractAsync(request),
+        wait: (hash) => publicClient.waitForTransactionReceipt({ hash }),
       });
-
-      toast.success("Challenge submitted.");
+      toast.success("Challenge confirmed.");
       setOpen(false);
       setTitle("");
       setDescription("");
@@ -293,10 +322,10 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
   const activeDispute = latestChallenge && !latestChallenge.resolutionTime ? latestChallenge : null;
   const balanceIssues: string[] = [];
 
-  if (isConnected && onSepolia && !hasEnoughTokenBalance) {
+  if (isConnected && onRequiredChain && !hasEnoughTokenBalance) {
     balanceIssues.push(`Insufficient balance. Need ${formatUnits(requiredChallengeStake, resolvedTokenDecimals)} ${resolvedTokenSymbol} for the challenge stake.`);
   }
-  if (isConnected && onSepolia && !hasEnoughNativeBalance) {
+  if (isConnected && onRequiredChain && !hasEnoughNativeBalance) {
     balanceIssues.push(`Insufficient balance. Need ${formatEther(arbitrationCost || 0n)} ETH for arbitration.`);
   }
 
@@ -343,7 +372,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
             <Button
               className="sm:flex-1"
               onClick={() => void onChallenge()}
-              disabled={submitting || !isConnected || !onSepolia || !dataReady || Boolean(activeDispute) || balanceIssues.length > 0}
+              disabled={submitting || !isConnected || !onRequiredChain || !dataReady || Boolean(activeDispute) || balanceIssues.length > 0}
             >
               {submitting
                 ? "Working…"
@@ -358,7 +387,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
           </div>
 
           {!isConnected ? <div className="text-xs text-muted-foreground">Connect your wallet to continue.</div> : null}
-          {isConnected && !onSepolia ? <div className="text-xs text-red-300">Wrong network. Switch to Sepolia.</div> : null}
+          {isConnected && !onRequiredChain ? <div className="text-xs text-red-300">Wrong network. Switch to {deployment.chainName}.</div> : null}
           {activeDispute ? <div className="text-xs text-amber-300">This item is already disputed. Use the dispute panel on the page to fund appeals or inspect the case.</div> : null}
           {balanceIssues.map((issue) => (
             <div key={issue} className="text-xs text-red-300">

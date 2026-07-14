@@ -24,6 +24,8 @@ import {
   type AgentSubgraphNetwork,
 } from "@/lib/agent-networks";
 import type { Agent } from "@/types/agent";
+import { useVerificationEnvironment } from "@/components/verification-environment-provider";
+import { AgentImage } from "@/components/agents/agent-image";
 
 type RankedAgent = {
   id: string;
@@ -119,13 +121,8 @@ function formatStake(raw: string | undefined, decimals = 18) {
   }
 }
 
-function moderationTone(answer: HighlightsResponse["moderation"][number]["answer"]) {
-  if (answer === "YES") return "border-red-500/30 bg-red-500/10 text-red-300";
-  if (answer === "NO") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
-  return "border-amber-500/30 bg-amber-500/10 text-amber-300";
-}
-
 export default function ExplorePage() {
+  const { environment, withEnvironment } = useVerificationEnvironment();
   const [verifiedFilter, setVerifiedFilter] = React.useState<"highestStake" | "latest">("highestStake");
   const [query, setQuery] = React.useState("");
   const [searchedAgents, setSearchedAgents] = React.useState<Agent[]>([]);
@@ -137,11 +134,14 @@ export default function ExplorePage() {
   const [previewByKey, setPreviewByKey] = React.useState<Record<string, AgentPreview>>({});
   const [loading, setLoading] = React.useState(true);
 
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     const loadStats = (async () => {
       try {
-        const statsRes = await fetch(`/api/stats?sampleSize=${EXPLORE_STATS_SAMPLE_SIZE}`, { cache: "no-store" });
+        const statsRes = await fetch(`/api/stats?sampleSize=${EXPLORE_STATS_SAMPLE_SIZE}`, {
+          cache: "no-store",
+          signal,
+        });
         const statsJson = (await statsRes.json()) as StatsResponse;
         if (statsJson.success) setStats(statsJson);
       } catch {
@@ -150,20 +150,25 @@ export default function ExplorePage() {
     })();
 
     try {
-      const highlightsRes = await fetch("/api/home/highlights", { cache: "no-store" });
+      const highlightsRes = await fetch(`/api/home/highlights?verificationEnvironment=${environment}`, {
+        cache: "no-store",
+        signal,
+      });
       const highlightsJson = (await highlightsRes.json()) as HighlightsResponse;
-      if (highlightsJson.success) setHighlights(highlightsJson);
+      if (!signal?.aborted && highlightsJson.success) setHighlights(highlightsJson);
     } catch {
       // Keep previous highlights if the request fails.
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
 
     void loadStats;
-  }, []);
+  }, [environment]);
 
   React.useEffect(() => {
-    void load();
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
   }, [load]);
 
   const runAgentSearch = React.useCallback(async () => {
@@ -181,7 +186,7 @@ export default function ExplorePage() {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), EXPLORE_SEARCH_TIMEOUT_MS);
     try {
-      const res = await fetch(`/api/agents?q=${encodeURIComponent(trimmed)}&pageSize=12&network=all`, {
+      const res = await fetch(`/api/agents?q=${encodeURIComponent(trimmed)}&pageSize=12&network=all&verificationEnvironment=${environment}`, {
         cache: "no-store",
         signal: controller.signal,
       });
@@ -207,7 +212,7 @@ export default function ExplorePage() {
       window.clearTimeout(timeout);
       setSearchingAgents(false);
     }
-  }, [query]);
+  }, [environment, query]);
 
   React.useEffect(() => {
     if (query.trim()) return;
@@ -232,7 +237,7 @@ export default function ExplorePage() {
         toFetch.map(async (item) => {
           const key = `${item.network}:${item.id}`;
           try {
-            const res = await fetch(`/api/agents/${encodeURIComponent(item.id)}?network=${encodeURIComponent(item.network)}`, {
+            const res = await fetch(`/api/agents/${encodeURIComponent(item.id)}?network=${encodeURIComponent(item.network)}&verificationEnvironment=${environment}`, {
               cache: "no-store",
             });
             if (!res.ok) return [key, { image: null, description: null }] as const;
@@ -263,7 +268,7 @@ export default function ExplorePage() {
     return () => {
       cancelled = true;
     };
-  }, [stats, previewByKey]);
+  }, [environment, stats, previewByKey]);
 
   const activityCards = React.useMemo(() => {
     if (!stats?.activityPreview?.length) return [] as ActivityDigest[];
@@ -317,7 +322,7 @@ export default function ExplorePage() {
         <section className="mb-10">
           <h1 className="text-4xl font-black tracking-tight text-white sm:text-5xl">Explore The DEX8004 Ecosystem</h1>
           <p className="mt-3 max-w-3xl text-lg text-white/75">
-            Discover trusted agents, monitor moderation signals, and review reputation before interacting.
+            Discover verified agents and review portable reputation before interacting.
           </p>
         </section>
 
@@ -352,7 +357,7 @@ export default function ExplorePage() {
                     >
                       Latest
                     </button>
-                    <Link href="/verified" className="text-xs text-cyan-200/80 hover:text-cyan-200 underline underline-offset-4">
+                    <Link href={withEnvironment("/verified")} className="text-xs text-cyan-200/80 hover:text-cyan-200 underline underline-offset-4">
                       View All
                     </Link>
                   </div>
@@ -365,7 +370,7 @@ export default function ExplorePage() {
                     </div>
                   ) : visibleVerifiedAgents.length > 0 ? (
                     visibleVerifiedAgents.map((item, index) => {
-                      const href = item.curateItemUrl || `/agents/${encodeURIComponent(item.id)}?network=${item.network}`;
+                      const href = item.curateItemUrl || withEnvironment(`/agents/${encodeURIComponent(item.id)}?network=${item.network}`);
                       const external = Boolean(item.curateItemUrl);
                       const verifiedAt = Number(item.verifiedAt || 0);
                       const topStake = verifiedFilter === "highestStake" && index === 0;
@@ -407,8 +412,10 @@ export default function ExplorePage() {
                       );
                     })
                   ) : (
-                    <div className="flex h-full min-h-[13.5rem] items-center justify-center text-xs text-white/65">
-                      Verified agents are temporarily unavailable.
+                    <div className="flex h-full min-h-[13.5rem] items-center justify-center px-5 text-center text-xs text-white/65">
+                      {environment === "mainnet"
+                        ? "No verified agents have been submitted to the Ethereum registry yet."
+                        : "Verified agents are temporarily unavailable."}
                     </div>
                   )}
                 </div>
@@ -417,41 +424,14 @@ export default function ExplorePage() {
               <div className="min-w-0 overflow-hidden rounded-xl border border-white/15 bg-black/30 p-4">
                 <div className="mb-3 flex flex-wrap items-center gap-2">
                   <ShieldAlert className="h-4 w-4 text-amber-300" />
-                  <h2 className="text-lg font-semibold text-white">Recent moderation abuse reports</h2>
+                  <h2 className="text-lg font-semibold text-white">Moderation</h2>
+                  <Badge className="ml-auto border-amber-400/30 bg-amber-400/10 text-amber-200">Coming soon</Badge>
                 </div>
-                <div className="min-h-[13.5rem] max-h-[13.5rem] space-y-2 overflow-x-hidden overflow-y-auto pr-1">
-                  {loading && !highlights ? (
-                    <div className="flex h-full min-h-[13.5rem] items-center justify-center text-xs text-white/65">
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Loading moderation signals...
-                    </div>
-                  ) : (highlights?.moderation || []).length > 0 ? (
-                    (highlights?.moderation || []).slice(0, 14).map((row) => (
-                      <Link
-                        key={row.questionId}
-                        href={`/moderation?q=${encodeURIComponent(row.questionId)}`}
-                        className="block h-[66px] min-w-0 rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 hover:border-white/25"
-                      >
-                        <div className="flex h-full min-w-0 flex-col justify-between">
-                          <div className="flex min-w-0 items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="truncate text-sm font-medium text-white">{row.agentId || row.questionId.slice(0, 12)}</div>
-                              <div className="truncate text-[10px] text-white/60">{row.question}</div>
-                            </div>
-                            <Badge className={`shrink-0 px-1.5 py-0 text-[10px] ${moderationTone(row.answer)}`}>{row.answer}</Badge>
-                          </div>
-                          <div className="flex min-w-0 items-center justify-between gap-2 text-[10px] text-white/55">
-                            <span className="truncate">{row.questionId.slice(0, 12)}...</span>
-                            <span className="shrink-0">{formatAgo(row.created)}</span>
-                          </div>
-                        </div>
-                      </Link>
-                    ))
-                  ) : (
-                    <div className="flex h-full min-h-[13.5rem] items-center justify-center text-xs text-white/65">
-                      No moderation reports available.
-                    </div>
-                  )}
+                <div className="flex min-h-[13.5rem] flex-col items-center justify-center px-5 text-center">
+                  <ShieldAlert className="h-8 w-8 text-amber-200/80" />
+                  <p className="mt-4 max-w-sm text-sm text-white/70">
+                    Community reports and arbitration controls will appear here when moderation launches.
+                  </p>
                 </div>
               </div>
           </section>
@@ -465,7 +445,7 @@ export default function ExplorePage() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => (e.key === "Enter" ? void runAgentSearch() : null)}
-                  placeholder="Search by name, owner, entity id, or agent id"
+                  placeholder="Search by agent number"
                   className="h-11 w-full rounded-lg border border-white/20 bg-black/30 pl-10 pr-4 text-sm text-white placeholder:text-white/55 focus:border-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-300/20"
                 />
               </div>
@@ -478,7 +458,7 @@ export default function ExplorePage() {
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
               <Button asChild variant="outline" className="h-11 border-white/20 bg-white/5 text-white hover:bg-white/10">
-                <Link href="/agents?network=all">Explore All</Link>
+                <Link href={withEnvironment("/agents?network=all")}>Explore All</Link>
               </Button>
             </div>
             {hasSearchedAgents ? (
@@ -518,7 +498,7 @@ export default function ExplorePage() {
                               </div>
                               <div className="flex items-center gap-2 shrink-0">
                                 <Button asChild size="sm" variant="ghost" className="rounded-lg text-white hover:bg-white/10">
-                                  <Link href={`/agents/${encodeURIComponent(agent.id)}?network=${network}`}>View</Link>
+                                  <Link href={withEnvironment(`/agents/${encodeURIComponent(agent.id)}?network=${network}`)}>View</Link>
                                 </Button>
                               </div>
                             </div>
@@ -570,7 +550,7 @@ export default function ExplorePage() {
                 {activityCards.map((item) => (
                   <Link
                     key={`${item.network}:${item.id}`}
-                    href={`/agents/${encodeURIComponent(item.id)}?network=${item.network}`}
+                    href={withEnvironment(`/agents/${encodeURIComponent(item.id)}?network=${item.network}`)}
                     className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm hover:border-white/25"
                   >
                     <div className="min-w-0 space-y-1">
@@ -611,6 +591,7 @@ function AgentCarousel({
   items: RankedAgent[];
   previewByKey: Record<string, AgentPreview>;
 }) {
+  const { withEnvironment } = useVerificationEnvironment();
   const scrollerRef = React.useRef<HTMLDivElement | null>(null);
   const [canScrollLeft, setCanScrollLeft] = React.useState(false);
   const [canScrollRight, setCanScrollRight] = React.useState(false);
@@ -686,16 +667,15 @@ function AgentCarousel({
           return (
             <Link
               key={`${title}-${key}`}
-              href={`/agents/${encodeURIComponent(item.id)}?network=${item.network}`}
+              href={withEnvironment(`/agents/${encodeURIComponent(item.id)}?network=${item.network}`)}
               className="group block w-[230px] shrink-0 snap-start overflow-hidden rounded-xl border border-white/10 bg-white/[0.03] hover:border-cyan-300/40"
             >
               <div className="h-28 w-full overflow-hidden bg-gradient-to-br from-cyan-900/30 via-emerald-900/20 to-slate-900/20">
-                {preview?.image ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={preview.image} alt={item.name} className="h-full w-full object-cover transition group-hover:scale-[1.03]" />
-                ) : (
-                  <div className="flex h-full items-center justify-center text-xs text-white/60">No image</div>
-                )}
+                <AgentImage
+                  src={preview?.image}
+                  alt={item.name}
+                  className="h-full w-full object-cover transition group-hover:scale-[1.03]"
+                />
               </div>
               <div className="p-3">
                 <div className="truncate text-sm font-medium text-white">{item.name}</div>

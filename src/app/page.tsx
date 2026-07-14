@@ -5,9 +5,11 @@ import Link from "next/link";
 import {
   Activity,
   ArrowRight,
+  BadgeCheck,
   ChevronRight,
   HandCoins,
   Loader2,
+  MessageSquareText,
   ShieldAlert,
   ShieldCheck,
 } from "lucide-react";
@@ -15,6 +17,7 @@ import { formatUnits } from "viem";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { type AgentSubgraphNetwork } from "@/lib/agent-networks";
+import { useVerificationEnvironment } from "@/components/verification-environment-provider";
 
 type HighlightsResponse = {
   success: boolean;
@@ -40,10 +43,10 @@ type HighlightsResponse = {
 };
 
 const HERO_DESCRIPTORS = [
-  "Marketplace",
+  "Agent Registry",
   "Agent Explorer",
   "Trust Registry",
-  "Dispute Resolution",
+  "Custom Verification",
 ] as const;
 
 const STATIC_HISTORY_ROWS = [
@@ -82,6 +85,7 @@ function formatStake(raw: string | undefined, decimals = 18) {
 }
 
 export default function HomePage() {
+  const { environment, withEnvironment } = useVerificationEnvironment();
   const [highlights, setHighlights] = React.useState<HighlightsResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
 
@@ -91,21 +95,26 @@ export default function HomePage() {
   const [descriptorVisible, setDescriptorVisible] = React.useState(true);
   const fadeTimeoutRef = React.useRef<number | null>(null);
 
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      const highlightsRes = await fetch("/api/home/highlights", { cache: "no-store" });
+      const highlightsRes = await fetch(`/api/home/highlights?verificationEnvironment=${environment}`, {
+        cache: "no-store",
+        signal,
+      });
       const highlightsJson = (await highlightsRes.json()) as HighlightsResponse;
-      if (highlightsJson.success) setHighlights(highlightsJson);
+      if (!signal?.aborted && highlightsJson.success) setHighlights(highlightsJson);
     } catch {
       // Keep previous highlights on request failure.
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
-  }, []);
+  }, [environment]);
 
   React.useEffect(() => {
-    void load();
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
   }, [load]);
 
   React.useEffect(() => {
@@ -156,11 +165,12 @@ export default function HomePage() {
       { name: "wen v2", id: "1143", stake: "0.001", rank: 4 },
     ];
 
-    return Array.from({ length: 4 }).map((_, index) => {
+    const length = environment === "mainnet" ? highestStakeAgents.length : 4;
+    return Array.from({ length }).map((_, index) => {
       const item = highestStakeAgents[index];
-      if (!item) return { ...fallback[index], href: "/verified", external: false };
+      if (!item) return { ...fallback[index], href: withEnvironment("/verified"), external: false };
 
-      const href = item.curateItemUrl || `/agents/${encodeURIComponent(item.id)}?network=${item.network}`;
+      const href = item.curateItemUrl || withEnvironment(`/agents/${encodeURIComponent(item.id)}?network=${item.network}`);
       return {
         name: item.name,
         id: item.agentId,
@@ -170,7 +180,7 @@ export default function HomePage() {
         external: Boolean(item.curateItemUrl),
       };
     });
-  }, [highestStakeAgents, highlights?.verifiedStakeDecimals]);
+  }, [environment, highestStakeAgents, highlights?.verifiedStakeDecimals, withEnvironment]);
 
   return (
     <div className="relative overflow-hidden">
@@ -186,7 +196,7 @@ export default function HomePage() {
             </span>
             <span className="text-white/95">8004</span>
           </h1>
-          <p className="sr-only">Decentralized Marketplace, Agent Explorer, Trust Registry, and Dispute Resolution.</p>
+          <p className="sr-only">Decentralized Agent Registry, Agent Explorer, Trust Registry, and Custom Verification.</p>
 
           {prefersReducedMotion ? (
             <div className="mt-8 h-12">
@@ -223,14 +233,14 @@ export default function HomePage() {
           )}
 
           <h2 className="mx-auto mt-10 max-w-4xl px-2 text-center text-lg font-normal leading-relaxed tracking-[-0.01em] text-white/70 sm:px-0 sm:text-xl">
-            No central authority. Stake, verify, trade, and enforce compliance through decentralized dispute resolution. You have the power.
+            Discover agents, verify claims, and build portable trust through open registries and transparent dispute resolution.
           </h2>
 
           <div className="mx-auto mt-16 h-px w-full max-w-4xl bg-gradient-to-r from-transparent via-white/15 to-transparent" />
         </section>
 
-        <section className="mt-40 grid items-center gap-20 lg:grid-cols-[0.88fr_1.12fr]">
-          <div className="relative rounded-3xl border border-emerald-300/20 bg-[#07171a]/80 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.45)] backdrop-blur-sm">
+        <section className="mt-32 grid items-center gap-14 lg:grid-cols-[0.88fr_1.12fr] lg:gap-20">
+          <div className="relative rounded-lg border border-emerald-300/20 bg-[#07171a]/80 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.45)] backdrop-blur-sm">
             <div className="mb-4 flex items-center justify-between border-b border-emerald-300/18 pb-3">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-emerald-200" />
@@ -252,7 +262,7 @@ export default function HomePage() {
                     href={item.href}
                     target={item.external ? "_blank" : undefined}
                     rel={item.external ? "noreferrer" : undefined}
-                    className="block rounded-2xl border border-emerald-300/24 bg-[#041012] px-4 py-3 shadow-[0_0_0_1px_rgba(110,231,183,0.05),0_0_16px_rgba(16,185,129,0.1)] transition hover:border-emerald-200/45 hover:shadow-[0_0_0_1px_rgba(110,231,183,0.1),0_0_22px_rgba(16,185,129,0.14)]"
+                    className="block rounded-md border border-emerald-300/24 bg-[#041012] px-4 py-3 shadow-[0_0_0_1px_rgba(110,231,183,0.05),0_0_16px_rgba(16,185,129,0.1)] transition hover:border-emerald-200/45 hover:shadow-[0_0_0_1px_rgba(110,231,183,0.1),0_0_22px_rgba(16,185,129,0.14)]"
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
@@ -269,11 +279,17 @@ export default function HomePage() {
                     </div>
                   </Link>
                 ))}
+                {environment === "mainnet" && verifiedShowcaseRows.length === 0 ? (
+                  <div className="flex min-h-[180px] flex-col items-center justify-center rounded-md border border-dashed border-emerald-300/25 px-5 text-center">
+                    <div className="font-medium text-white">No mainnet submissions yet</div>
+                    <p className="mt-2 text-sm text-white/60">Be the first agent in the Ethereum Stake Curate registry.</p>
+                  </div>
+                ) : null}
               </div>
             )}
 
             <Button asChild className="mt-4 w-full border border-emerald-300/40 bg-emerald-300/18 text-white hover:bg-emerald-300/28">
-              <Link href="/verified">Verified</Link>
+              <Link href={withEnvironment("/verified")}>Verified</Link>
             </Button>
           </div>
 
@@ -291,22 +307,42 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="mt-48 grid items-center gap-20 lg:grid-cols-[1.14fr_0.86fr]">
-          <div className="self-center px-1 sm:px-0">
-            <h3 className="text-3xl font-black tracking-[-0.03em] text-white sm:text-4xl lg:text-[2.65rem]">
-              Safe, fast{" "}
-              <span className="bg-gradient-to-r from-cyan-300 via-cyan-200 to-cyan-400 bg-clip-text text-transparent">
-                interactions
-              </span>
-            </h3>
-            <p className="mt-8 max-w-3xl text-xl leading-tight text-white/88 sm:text-[1.65rem]">
-              Interact immediately with verified agents. You do not need to verify by yourself because someone already did it for you.
-              If you want to inspect every detail, all the information is transparent and available.
-            </p>
-          </div>
+        <section className="mt-32 border-y border-white/12 py-14 sm:py-16">
+          <div className="grid items-center gap-14 lg:grid-cols-[1fr_0.9fr] lg:gap-20">
+            <div>
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase text-emerald-200">
+                <MessageSquareText className="h-4 w-4" />
+                Kleros Oracle feedback
+              </div>
+              <h3 className="mt-4 text-3xl font-black text-white sm:text-4xl">
+                One request: global presence and recognition
+              </h3>
+              <p className="mt-6 max-w-2xl text-lg leading-relaxed text-white/75">
+                Receive feedback from the #1 decentralized justice protocol, recognized by jurisdictions worldwide. The result is published to the ERC-8004 Oracle, making it visible here and available to every compatible platform, including block explorers.
+              </p>
+            </div>
 
-          <div className="relative rounded-3xl border border-cyan-300/20 bg-[#040a12]/88 p-6 shadow-[0_24px_60px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:p-7">
-            <div className="pointer-events-none absolute inset-0 rounded-3xl bg-[linear-gradient(138deg,rgba(34,211,238,0.08)_0%,transparent_42%,transparent_62%,rgba(34,211,238,0.04)_100%)]" />
+            <div className="border border-emerald-300/20 bg-[#06100f]/75">
+              <div className="flex items-center justify-between border-b border-emerald-300/15 px-4 py-3">
+                <span className="text-xs font-semibold uppercase text-white/55">Portable feedback</span>
+                <Badge className="border-emerald-300/30 bg-emerald-300/12 text-emerald-100">ERC-8004</Badge>
+              </div>
+              <div className="space-y-0">
+                <FeedbackSignal label="Source" value="Kleros Oracle" />
+                <FeedbackSignal label="Outcome" value="Verification recorded" />
+                <FeedbackSignal label="Benefit" value="More confidence, better discovery" />
+              </div>
+              <div className="flex items-center gap-2 border-t border-emerald-300/15 px-4 py-4 text-sm text-emerald-100">
+                <BadgeCheck className="h-4 w-4" />
+                Verifiable feedback users can inspect
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="mt-32 grid items-center gap-14 lg:grid-cols-[0.86fr_1.14fr] lg:gap-20">
+          <div className="order-2 relative rounded-lg border border-cyan-300/20 bg-[#040a12]/88 p-6 shadow-[0_24px_60px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:p-7 lg:order-1">
+            <div className="pointer-events-none absolute inset-0 rounded-lg bg-[linear-gradient(138deg,rgba(34,211,238,0.08)_0%,transparent_42%,transparent_62%,rgba(34,211,238,0.04)_100%)]" />
             <div className="mb-6 border-b border-cyan-300/18 pb-4">
               <div className="flex items-center gap-2.5">
                 <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-300/30 bg-cyan-300/10">
@@ -350,22 +386,35 @@ export default function HomePage() {
             </div>
 
             <Button asChild className="mt-4 w-full border border-cyan-300/40 bg-cyan-300/18 text-white hover:bg-cyan-300/28">
-              <Link href="/explore">
+              <Link href={withEnvironment("/explore")}>
                 Explore
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
             </Button>
           </div>
+
+          <div className="order-1 self-center px-1 sm:px-0 lg:order-2">
+            <h3 className="text-3xl font-black tracking-[-0.03em] text-white sm:text-4xl lg:text-[2.65rem]">
+              Safe, fast{" "}
+              <span className="bg-gradient-to-r from-cyan-300 via-cyan-200 to-cyan-400 bg-clip-text text-transparent">
+                interactions
+              </span>
+            </h3>
+            <p className="mt-8 max-w-3xl text-xl leading-tight text-white/88 sm:text-[1.65rem]">
+              Interact immediately with verified agents. You do not need to verify by yourself because someone already did it for you.
+              If you want to inspect every detail, all the information is transparent and available.
+            </p>
+          </div>
         </section>
 
         <section className="mt-52">
           <h3 className="mx-auto max-w-5xl text-center text-2xl font-black tracking-[-0.03em] text-white sm:text-3xl lg:text-[2.6rem]">
-            Think an agent misbehaved? You have two options (and can profit from them)
+            Think an agent broke the rules? Challenge the evidence
           </h3>
           <div className="mx-auto mt-6 h-px w-full max-w-5xl bg-gradient-to-r from-transparent via-white/25 to-transparent" />
 
           <div className="mt-10 grid gap-5 md:grid-cols-2">
-            <article className="group relative overflow-hidden rounded-2xl border border-emerald-300/20 bg-[#050e12]/88 p-6 text-center transition-colors hover:border-emerald-200/38 sm:p-7">
+            <article className="group relative overflow-hidden rounded-lg border border-emerald-300/20 bg-[#050e12]/88 p-6 text-center transition-colors hover:border-emerald-200/38 sm:p-7">
               <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(150deg,rgba(16,185,129,0.14)_0%,transparent_55%)]" />
               <HandCoins className="mx-auto mb-5 h-11 w-11 text-emerald-100" />
               <p className="relative mx-auto max-w-[34ch] text-lg font-semibold leading-snug text-white/90 sm:text-xl">
@@ -377,27 +426,27 @@ export default function HomePage() {
               </p>
             </article>
 
-            <article className="group relative overflow-hidden rounded-2xl border border-amber-300/20 bg-[#120d06]/88 p-6 text-center transition-colors hover:border-amber-200/40 sm:p-7">
+            <article className="group relative overflow-hidden rounded-lg border border-amber-300/20 bg-[#120d06]/88 p-6 text-center transition-colors hover:border-amber-200/40 sm:p-7">
               <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(30deg,rgba(245,158,11,0.14)_0%,transparent_55%)]" />
               <ShieldAlert className="mx-auto mb-5 h-11 w-11 text-amber-100" />
+              <Badge className="relative mb-4 border-amber-300/30 bg-amber-300/10 text-amber-100">Coming soon</Badge>
               <p className="relative mx-auto max-w-[34ch] text-lg font-semibold leading-snug text-white/90 sm:text-xl">
-                If an agent is not collateralized, you can still flag it via the{" "}
+                Community reporting for agents without collateral will arrive with the{" "}
                 <span className="bg-gradient-to-r from-amber-200 via-amber-300 to-orange-300 bg-clip-text text-transparent">
-                  Report Abuse
+                  moderation workflow
                 </span>{" "}
-                section.
+                .
               </p>
             </article>
           </div>
 
           <p className="mx-auto mt-8 max-w-4xl text-center text-base text-white/84 sm:text-lg">
-            It does not matter if you interacted with the agent. If you want to earn or warn the community, the final goal
-            is always transparent information for everyone.
+            Curate challenges remain available now. Community reports, answers, and arbitration controls are being prepared for a later release.
           </p>
 
           <div className="mt-7 flex justify-center">
             <Button asChild className="border border-cyan-200/45 bg-cyan-200/18 px-6 text-white hover:bg-cyan-200/28">
-              <Link href="/trust">
+              <Link href={withEnvironment("/trust")}>
                 Analyze
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
@@ -406,20 +455,19 @@ export default function HomePage() {
         </section>
 
         <section className="mt-40 pb-2">
-          <div className="relative overflow-hidden rounded-3xl border border-cyan-300/15 bg-[#02060d]/82 p-8 text-center shadow-[0_22px_70px_rgba(0,0,0,0.4)] sm:p-12">
+          <div className="relative overflow-hidden rounded-lg border border-cyan-300/15 bg-[#02060d]/82 p-8 text-center shadow-[0_22px_70px_rgba(0,0,0,0.4)] sm:p-12">
             <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(34,211,238,0.12)_0%,rgba(34,211,238,0.04)_34%,transparent_70%)]" />
             <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(130deg,transparent_0%,rgba(34,211,238,0.08)_54%,transparent_100%)]" />
             <h3 className="relative text-2xl font-black tracking-[-0.02em] text-white sm:text-3xl">
-              Do you want to sell or buy an agent? You are in the right place.
+              Define what verified means for your market
             </h3>
             <p className="relative mx-auto mt-6 max-w-4xl text-base text-white/85 sm:text-lg">
-              Set up a decentralized escrow using Kleros Court to resolve any dispute and make the transaction safe,
-              whether you are selling or buying.
+              Set your own criteria, issue a trusted badge, and create a standard that products can use to grant access or privileges.
             </p>
             <div className="relative mt-7">
               <Button asChild className="border border-cyan-200/40 bg-cyan-200/18 text-white hover:bg-cyan-200/28">
-                <Link href="/trade">
-                  Go To Trade
+                <Link href="/launch">
+                  Build Your Standard
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>
@@ -427,6 +475,15 @@ export default function HomePage() {
           </div>
         </section>
       </main>
+    </div>
+  );
+}
+
+function FeedbackSignal({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-emerald-300/10 px-4 py-4 last:border-b-0">
+      <span className="text-xs uppercase text-white/45">{label}</span>
+      <span className="text-right text-sm font-medium text-white/90">{value}</span>
     </div>
   );
 }

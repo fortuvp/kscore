@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GraphQLClient, gql } from "graphql-request";
-import { getCurateSubgraphUrl, getGoldskyApiKey } from "@/lib/curate-config";
+import { gql } from "graphql-request";
+import { getPgtcrDeployment } from "@/lib/curate-config";
+import { makePgtcrSubgraphClient } from "@/lib/pgtcr-subgraph";
+import { getVerificationEnvironmentFromSearchParams } from "@/lib/verification-environment";
 
 const QUERY = gql`
-  query ItemsBySubmitter($submitter: Bytes!, $skip: Int!, $first: Int!) {
+  query ItemsBySubmitter($registry: Bytes!, $submitter: Bytes!, $skip: Int!, $first: Int!) {
     items(
-      where: { submitter: $submitter }
+      where: { registryAddress: $registry, submitter: $submitter }
       orderBy: includedAt
       orderDirection: desc
       skip: $skip
@@ -27,17 +29,30 @@ export async function GET(request: NextRequest) {
   const submitter = request.nextUrl.searchParams.get("submitter")?.toLowerCase();
   const skip = Math.max(0, Number(request.nextUrl.searchParams.get("skip") || "0") || 0);
   const first = Math.min(200, Math.max(1, Number(request.nextUrl.searchParams.get("first") || "60") || 60));
+  const verificationEnvironment = getVerificationEnvironmentFromSearchParams(request.nextUrl.searchParams);
 
   if (!submitter) {
     return NextResponse.json({ success: false, error: "Missing submitter", items: [] }, { status: 400 });
   }
 
   try {
-    const url = getCurateSubgraphUrl("pgtcr");
-    const apiKey = getGoldskyApiKey();
-    const client = new GraphQLClient(url, apiKey ? { headers: { "x-api-key": apiKey } } : undefined);
-    const res = await client.request<{ items: unknown[] }>(QUERY, { submitter, skip, first });
-    return NextResponse.json({ success: true, items: res.items || [], skip, first });
+    const deployment = getPgtcrDeployment(verificationEnvironment);
+    const client = makePgtcrSubgraphClient(verificationEnvironment);
+    const res = await client.request<{ items: unknown[] }>(QUERY, {
+      registry: deployment.registryAddress.toLowerCase(),
+      submitter,
+      skip,
+      first,
+    });
+    return NextResponse.json({
+      success: true,
+      verificationEnvironment,
+      chainId: deployment.chainId,
+      registryAddress: deployment.registryAddress,
+      items: res.items || [],
+      skip,
+      first,
+    });
   } catch (error) {
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : "Failed to fetch submitter items", items: [] },

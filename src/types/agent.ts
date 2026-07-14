@@ -31,6 +31,7 @@ export interface Agent {
     totalFeedback: string;
     lastActivity: string;
     registrationFile: AgentRegistrationFile | null;
+    collateralized?: boolean;
 }
 
 // Feedback from users

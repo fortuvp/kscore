@@ -11,6 +11,8 @@ import {
   type AgentSubgraphNetwork,
 } from "@/lib/agent-networks";
 import { WatchToggle } from "@/components/agents/watch-toggle";
+import { AgentImage } from "@/components/agents/agent-image";
+import { useVerificationEnvironment } from "@/components/verification-environment-provider";
 
 export function AgentCard({
   agent,
@@ -19,6 +21,7 @@ export function AgentCard({
   agent: Agent;
   network: AgentSubgraphNetwork;
 }) {
+  const { withEnvironment } = useVerificationEnvironment();
   const quality = computeAgentQualityScore(agent);
   const ownerExplorerUrl =
     getAddressExplorerUrl(agent.owner, agent.chainId) ||
@@ -28,16 +31,12 @@ export function AgentCard({
     <div className="rounded-xl border border-border/50 bg-card/50 p-4 backdrop-blur-sm">
       <div className="flex items-start gap-3">
         <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-lg bg-muted shrink-0">
-          {agent.registrationFile?.image ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={agent.registrationFile.image}
-              alt={getDisplayName(agent)}
-              className="h-12 w-12 object-cover"
-            />
-          ) : (
-            <span className="text-sm">AI</span>
-          )}
+          <AgentImage
+            src={agent.registrationFile?.image}
+            alt={getDisplayName(agent)}
+            className="h-12 w-12 object-cover"
+            fallbackClassName="text-sm"
+          />
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-base font-semibold">{getDisplayName(agent)}</div>
@@ -82,7 +81,7 @@ export function AgentCard({
         <div className="flex items-center gap-2">
           <WatchToggle agent={agent} network={network} size="sm" className="h-7 px-2" />
           <Link
-            href={`/agents/${encodeURIComponent(agent.id)}?network=${network}`}
+            href={withEnvironment(`/agents/${encodeURIComponent(agent.id)}?network=${network}`)}
             className="font-medium text-primary hover:text-primary/80"
           >
             View

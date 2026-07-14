@@ -26,10 +26,17 @@ import {
   type OrderDirection,
 } from "@/lib/subgraph.handler";
 import type { Agent } from "@/types/agent";
+import { mergeAgentMetadataSources } from "@/lib/agent-metadata";
+import {
+  getVerificationEnvironmentFromSearchParams,
+  type VerificationEnvironment,
+} from "@/lib/verification-environment";
+import { getPgtcrDeployment } from "@/lib/curate-config";
 
 const PRIMARY_SUBGRAPH_TIMEOUT_MS = 1800;
 const CURATE_FALLBACK_TIMEOUT_MS = 5000;
 const ONCHAIN_FALLBACK_TIMEOUT_MS = 7000;
+const COLLATERAL_INDEX_TIMEOUT_MS = 2500;
 
 type RouteNetwork = AgentSubgraphNetwork | null;
 type CollateralFilter = "all" | "collateralized" | "notCollateralized";
@@ -112,6 +119,17 @@ function getCollateralKeyForAgent(agent: Agent, fallback: AgentSubgraphNetwork) 
   return buildCollateralKey(resolveAgentNetwork(agent, fallback), agent.agentId);
 }
 
+function addCollateralSignals(
+  items: Agent[],
+  acceptedKeys: ReadonlySet<string>,
+  fallbackNetwork: AgentSubgraphNetwork
+) {
+  return items.map((agent) => ({
+    ...agent,
+    collateralized: acceptedKeys.has(getCollateralKeyForAgent(agent, fallbackNetwork)),
+  }));
+}
+
 function matchesAgentQuery(
   agent: {
     id: string;
@@ -152,9 +170,19 @@ async function getNetworksToSearch(network: RouteNetwork) {
   return network ? [network] : [...AGENT_SUBGRAPH_NETWORKS];
 }
 
-async function getAcceptedCollateralKeySet(networks: readonly AgentSubgraphNetwork[]) {
+async function getAcceptedCollateralKeySet(
+  networks: readonly AgentSubgraphNetwork[],
+  verificationEnvironment: VerificationEnvironment
+) {
   const groups = await Promise.all(
-    networks.map(async (network) => [network, await getAcceptedCurateAgentIds(network)] as const)
+    networks.map(async (network) => [
+      network,
+      await withTimeout(
+        getAcceptedCurateAgentIds(network, verificationEnvironment),
+        [] as string[],
+        COLLATERAL_INDEX_TIMEOUT_MS
+      ),
+    ] as const)
   );
 
   const keys = new Set<string>();
@@ -193,7 +221,7 @@ async function getSepoliaOnchainAgentById(agentIdLike: string) {
   const normalized = normalizeAgentIdLike(agentIdLike);
   if (!normalized) return null;
   return withTimeout(
-    getSepoliaIdentityRegistryFallbackAgentByAgentId(normalized).catch(() => null),
+    getSepoliaIdentityRegistryFallbackAgentByAgentId(normalized, { skipChainRefresh: true }).catch(() => null),
     null as Agent | null,
     ONCHAIN_FALLBACK_TIMEOUT_MS
   );
@@ -206,44 +234,61 @@ async function getListForNetwork(params: {
   orderBy: OrderBy;
   orderDirection: OrderDirection;
   protocol?: string;
+  verificationEnvironment: VerificationEnvironment;
 }) {
-  const primary = await withTimeout(
-    getAgents({
-      first: params.first,
-      skip: params.skip,
-      orderBy: params.orderBy,
-      orderDirection: params.orderDirection,
-      protocol: params.protocol,
-      network: params.network,
-    }),
-    null as Agent[] | null,
-    PRIMARY_SUBGRAPH_TIMEOUT_MS
-  );
-
-  if (primary && primary.length > 0) return primary;
-
-  if (params.network === "sepolia" && !params.protocol) {
-    const onchainFallback = await withTimeout(
-      listSepoliaIdentityRegistryFallbackAgents({
+  const [primary, onchainFallback] = await Promise.all([
+    withTimeout(
+      getAgents({
         first: params.first,
         skip: params.skip,
         orderBy: params.orderBy,
         orderDirection: params.orderDirection,
+        protocol: params.protocol,
+        network: params.network,
       }),
-      [] as Agent[],
-      ONCHAIN_FALLBACK_TIMEOUT_MS
-    );
+      null as Agent[] | null,
+      PRIMARY_SUBGRAPH_TIMEOUT_MS
+    ),
+    params.network === "sepolia"
+      ? withTimeout(
+          listSepoliaIdentityRegistryFallbackAgents({
+            first: params.first,
+            skip: params.skip,
+            orderBy: params.orderBy,
+            orderDirection: params.orderDirection,
+            protocol: params.protocol,
+          }),
+          null as Agent[] | null,
+          ONCHAIN_FALLBACK_TIMEOUT_MS
+        )
+      : Promise.resolve(null as Agent[] | null),
+  ]);
 
-    if (onchainFallback.length > 0) return onchainFallback;
+  // Sepolia's registry contract is canonical for identity/ownership, but the
+  // subgraph can still have richer parsed metadata while an IPFS request retries.
+  if (onchainFallback !== null) {
+    const primaryByKey = new Map(
+      (primary || []).map((agent) => [getUniqueKey(agent, params.network), agent] as const)
+    );
+    return onchainFallback.map((agent) =>
+      mergeAgentMetadataSources(agent, primaryByKey.get(getUniqueKey(agent, params.network)))
+    );
   }
+  if (primary && primary.length > 0) return primary;
 
   const curateFallback = await withTimeout(
-    listCurateFallbackAgents({ network: params.network, first: params.first, skip: params.skip }),
+    listCurateFallbackAgents({
+      network: params.network,
+      first: params.first,
+      skip: params.skip,
+      verificationEnvironment: params.verificationEnvironment,
+    }),
     [] as Agent[],
     CURATE_FALLBACK_TIMEOUT_MS
   );
 
-  return curateFallback.length > 0 ? curateFallback : primary || [];
+  const filteredCurateFallback = curateFallback.filter((agent) => matchesProtocol(agent, params.protocol));
+  return filteredCurateFallback.length > 0 ? filteredCurateFallback : primary || [];
 }
 
 async function getQueryResultsForNetwork(params: {
@@ -253,6 +298,7 @@ async function getQueryResultsForNetwork(params: {
   orderBy: OrderBy;
   orderDirection: OrderDirection;
   protocol?: string;
+  verificationEnvironment: VerificationEnvironment;
 }) {
   const [nameResults, directAgentResults, broadResults, curateResults, onchainResults] = await Promise.all([
     withTimeout(
@@ -281,7 +327,9 @@ async function getQueryResultsForNetwork(params: {
         }
 
         return withTimeout(
-          getCurateFallbackAgentByAgentId(agentIdCandidate, params.network)
+          getCurateFallbackAgentByAgentId(agentIdCandidate, params.network, 10, {
+            verificationEnvironment: params.verificationEnvironment,
+          })
             .then((result) => result?.agent || null)
             .catch(() => null),
           null as Agent | null,
@@ -301,22 +349,26 @@ async function getQueryResultsForNetwork(params: {
       [] as Agent[],
       PRIMARY_SUBGRAPH_TIMEOUT_MS
     ),
-    withTimeout(
-      searchCurateFallbackAgents({
-        query: params.query,
-        network: params.network,
-        first: params.first,
-      }),
-      [] as Agent[],
-      CURATE_FALLBACK_TIMEOUT_MS
-    ),
-    params.network === "sepolia" && !params.protocol
+    params.network === "sepolia"
+      ? Promise.resolve([] as Agent[])
+      : withTimeout(
+          searchCurateFallbackAgents({
+            query: params.query,
+            network: params.network,
+            first: params.first,
+            verificationEnvironment: params.verificationEnvironment,
+          }),
+          [] as Agent[],
+          CURATE_FALLBACK_TIMEOUT_MS
+        ),
+    params.network === "sepolia"
       ? withTimeout(
           searchSepoliaIdentityRegistryFallbackAgents({
             query: params.query,
             first: params.first,
             orderBy: params.orderBy,
             orderDirection: params.orderDirection,
+            protocol: params.protocol,
           }),
           [] as Agent[],
           ONCHAIN_FALLBACK_TIMEOUT_MS
@@ -333,7 +385,8 @@ async function getQueryResultsForNetwork(params: {
     if (!matchesProtocol(candidate, params.protocol)) continue;
     if (!matchesAgentQuery(candidate, params.query)) continue;
     const key = getUniqueKey(candidate, params.network);
-    if (!unique.has(key)) unique.set(key, candidate);
+    const existing = unique.get(key);
+    unique.set(key, existing ? mergeAgentMetadataSources(existing, candidate) : candidate);
   }
 
   return Array.from(unique.values()).sort((a, b) =>
@@ -347,6 +400,7 @@ async function getCollateralizedResultsForNetwork(params: {
   orderBy: OrderBy;
   orderDirection: OrderDirection;
   protocol?: string;
+  verificationEnvironment: VerificationEnvironment;
 }) {
   const curateCandidates = await withTimeout(
     params.query
@@ -354,41 +408,19 @@ async function getCollateralizedResultsForNetwork(params: {
           query: params.query,
           network: params.network,
           first: 200,
+          verificationEnvironment: params.verificationEnvironment,
         })
       : listCurateFallbackAgents({
           network: params.network,
           first: 200,
           skip: 0,
+          verificationEnvironment: params.verificationEnvironment,
         }),
     [] as Agent[],
     CURATE_FALLBACK_TIMEOUT_MS
   );
 
-  const hydrated = await Promise.all(
-    curateCandidates.map(async (fallbackAgent) => {
-      const primary = await withTimeout(
-        getAgentByAgentId(fallbackAgent.agentId, params.network, 10, true).catch(() => null),
-        null as Agent | null,
-        PRIMARY_SUBGRAPH_TIMEOUT_MS
-      );
-      if (primary) return primary;
-
-      if (params.network === "sepolia") {
-        const onchain = await getSepoliaOnchainAgentById(fallbackAgent.agentId);
-        if (onchain) {
-          return {
-            ...onchain,
-            agentURI: onchain.agentURI || fallbackAgent.agentURI,
-            registrationFile: onchain.registrationFile || fallbackAgent.registrationFile,
-          } satisfies Agent;
-        }
-      }
-
-      return fallbackAgent;
-    })
-  );
-
-  return hydrated
+  return curateCandidates
     .filter((agent) => matchesProtocol(agent, params.protocol))
     .filter((agent) => (params.query ? matchesAgentQuery(agent, params.query) : true))
     .sort((a, b) => compareAgents(a, b, params.orderBy, params.orderDirection));
@@ -403,10 +435,12 @@ export async function GET(request: NextRequest) {
   const protocol = searchParams.get("protocol") || undefined;
   const rawNetwork = searchParams.get("network");
   const collateralFilter = parseCollateralFilter(searchParams.get("collateralFilter"));
+  const verificationEnvironment = getVerificationEnvironmentFromSearchParams(searchParams);
+  const verificationChainId = getPgtcrDeployment(verificationEnvironment).chainId;
 
   if (!collateralFilter) {
     return NextResponse.json(
-      { success: false, error: "Invalid collateralFilter", items: [] },
+      { success: false, error: "Invalid collateralFilter", items: [], verificationEnvironment, verificationChainId },
       { status: 400 }
     );
   }
@@ -417,7 +451,7 @@ export async function GET(request: NextRequest) {
   } else if (rawNetwork) {
     if (!isAgentSubgraphNetwork(rawNetwork)) {
       return NextResponse.json(
-        { success: false, error: `Invalid network '${rawNetwork}'`, items: [] },
+        { success: false, error: `Invalid network '${rawNetwork}'`, items: [], verificationEnvironment, verificationChainId },
         { status: 400 }
       );
     }
@@ -430,25 +464,64 @@ export async function GET(request: NextRequest) {
   try {
     const networksToSearch = await getNetworksToSearch(network);
 
+    if (collateralFilter === "collateralized") {
+      const groups = await Promise.allSettled(
+        networksToSearch.map((networkKey) =>
+          getCollateralizedResultsForNetwork({
+            network: networkKey,
+            query,
+            orderBy,
+            orderDirection,
+            protocol,
+            verificationEnvironment,
+          })
+        )
+      );
+
+      const unique = new Map<string, Agent>();
+      for (let index = 0; index < groups.length; index++) {
+        const group = groups[index];
+        if (group.status !== "fulfilled") continue;
+        const fallbackNetwork = networksToSearch[index];
+        for (const agent of group.value) {
+          const key = getUniqueKey(agent, fallbackNetwork);
+          if (!unique.has(key)) unique.set(key, agent);
+        }
+      }
+
+      const merged = Array.from(unique.values()).sort((a, b) =>
+        compareAgents(a, b, orderBy, orderDirection)
+      );
+      const items = merged.slice(skip, skip + pageSize).map((agent) => ({
+        ...agent,
+        collateralized: true,
+      }));
+      return NextResponse.json({
+        success: true,
+        items,
+        page,
+        pageSize,
+        hasMore: merged.length > skip + pageSize,
+        network: network || "all",
+        verificationEnvironment,
+        verificationChainId,
+      });
+    }
+
+    const acceptedKeys = await getAcceptedCollateralKeySet(networksToSearch, verificationEnvironment);
+
     if (query) {
       const groups = await Promise.allSettled(
         networksToSearch.map((networkKey) =>
-          collateralFilter === "collateralized"
-            ? getCollateralizedResultsForNetwork({
-                network: networkKey,
-                query,
-                orderBy,
-                orderDirection,
-                protocol,
-              })
-            : getQueryResultsForNetwork({
-                network: networkKey,
-                query,
-                first: Math.max(pageSize * 6, 80),
-                orderBy,
-                orderDirection,
-                protocol,
-              })
+          getQueryResultsForNetwork({
+            network: networkKey,
+            query,
+            first: Math.max(pageSize * 6, 80),
+            orderBy,
+            orderDirection,
+            protocol,
+            verificationEnvironment,
+          })
         )
       );
 
@@ -468,61 +541,24 @@ export async function GET(request: NextRequest) {
       );
 
       if (collateralFilter === "notCollateralized") {
-        const acceptedKeys = await getAcceptedCollateralKeySet(networksToSearch);
         merged = merged.filter((agent) => !acceptedKeys.has(getCollateralKeyForAgent(agent, network || "sepolia")));
       }
 
       const results = merged.slice(skip, skip + pageSize);
       return NextResponse.json({
         success: true,
-        items: results,
+        items: addCollateralSignals(results, acceptedKeys, network || "sepolia"),
         page,
         pageSize,
         hasMore: merged.length > skip + pageSize,
         network: network || "all",
-      });
-    }
-
-    if (collateralFilter === "collateralized") {
-      const groups = await Promise.allSettled(
-        networksToSearch.map((networkKey) =>
-          getCollateralizedResultsForNetwork({
-            network: networkKey,
-            orderBy,
-            orderDirection,
-            protocol,
-          })
-        )
-      );
-
-      const unique = new Map<string, Agent>();
-      for (let index = 0; index < groups.length; index++) {
-        const group = groups[index];
-        if (group.status !== "fulfilled") continue;
-        const fallbackNetwork = networksToSearch[index];
-        for (const agent of group.value) {
-          const key = getUniqueKey(agent, fallbackNetwork);
-          if (!unique.has(key)) unique.set(key, agent);
-        }
-      }
-
-      const merged = Array.from(unique.values()).sort((a, b) =>
-        compareAgents(a, b, orderBy, orderDirection)
-      );
-      const items = merged.slice(skip, skip + pageSize);
-      return NextResponse.json({
-        success: true,
-        items,
-        page,
-        pageSize,
-        hasMore: merged.length > skip + pageSize,
-        network: network || "all",
+        verificationEnvironment,
+        verificationChainId,
       });
     }
 
     if (network) {
       if (collateralFilter === "notCollateralized") {
-        const acceptedKeys = await getAcceptedCollateralKeySet([network]);
         const fetchSize = Math.max(pageSize + skip + acceptedKeys.size + 24, 48);
         const agents = await getListForNetwork({
           network,
@@ -531,6 +567,7 @@ export async function GET(request: NextRequest) {
           orderBy,
           orderDirection,
           protocol,
+          verificationEnvironment,
         });
         const filtered = agents.filter(
           (agent) => !acceptedKeys.has(getCollateralKeyForAgent(agent, network))
@@ -538,31 +575,39 @@ export async function GET(request: NextRequest) {
         const items = filtered.slice(skip, skip + pageSize);
         return NextResponse.json({
           success: true,
-          items,
+          items: addCollateralSignals(items, acceptedKeys, network),
           page,
           pageSize,
           hasMore: filtered.length > skip + pageSize,
           network,
+          verificationEnvironment,
+          verificationChainId,
         });
       }
 
-      const items = await getListForNetwork({ network, first: pageSize, skip, orderBy, orderDirection, protocol });
+      const items = await getListForNetwork({
+        network,
+        first: pageSize,
+        skip,
+        orderBy,
+        orderDirection,
+        protocol,
+        verificationEnvironment,
+      });
       return NextResponse.json({
         success: true,
-        items,
+        items: addCollateralSignals(items, acceptedKeys, network),
         page,
         pageSize,
         hasMore: items.length === pageSize,
         network,
+        verificationEnvironment,
+        verificationChainId,
       });
     }
 
-    const acceptedKeys =
-      collateralFilter === "notCollateralized"
-        ? await getAcceptedCollateralKeySet(AGENT_SUBGRAPH_NETWORKS)
-        : null;
     const fetchSize = Math.max(
-      pageSize + skip + (acceptedKeys?.size || 0) + 24,
+      pageSize + skip + (collateralFilter === "notCollateralized" ? acceptedKeys.size : 0) + 24,
       48
     );
 
@@ -575,6 +620,7 @@ export async function GET(request: NextRequest) {
           orderBy,
           orderDirection,
           protocol,
+          verificationEnvironment,
         })
       )
     );
@@ -594,7 +640,7 @@ export async function GET(request: NextRequest) {
       compareAgents(a, b, orderBy, orderDirection)
     );
 
-    if (acceptedKeys) {
+    if (collateralFilter === "notCollateralized") {
       merged = merged.filter(
         (agent) => !acceptedKeys.has(getCollateralKeyForAgent(agent, "sepolia"))
       );
@@ -603,16 +649,24 @@ export async function GET(request: NextRequest) {
     const items = merged.slice(skip, skip + pageSize);
     return NextResponse.json({
       success: true,
-      items,
+      items: addCollateralSignals(items, acceptedKeys, "sepolia"),
       page,
       pageSize,
       hasMore: merged.length > skip + pageSize,
       network: "all",
+      verificationEnvironment,
+      verificationChainId,
     });
   } catch (error) {
     console.error("[Agents API] Error:", error);
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : "Unknown error", items: [] },
+      {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+        items: [],
+        verificationEnvironment,
+        verificationChainId,
+      },
       { status: 500 }
     );
   }

@@ -2,12 +2,13 @@
 
 import * as React from "react";
 import { useAccount, useConnect, useDisconnect, useChainId, useSwitchChain } from "wagmi";
-import { sepolia } from "wagmi/chains";
+import { mainnet, sepolia } from "wagmi/chains";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import { truncateAddress } from "@/lib/format";
 import { getAddressExplorerUrl } from "@/lib/block-explorer";
+import { useVerificationEnvironment } from "@/components/verification-environment-provider";
 
 type WalletKind = "metamask" | "rabby" | "walletconnect";
 
@@ -32,6 +33,7 @@ const WALLET_LABELS: Record<WalletKind, string> = {
 function getChainLabel(chainId: number | undefined) {
   if (!chainId) return "Unknown";
   if (chainId === sepolia.id) return "Sepolia";
+  if (chainId === mainnet.id) return "Ethereum";
   return `Chain ${chainId}`;
 }
 
@@ -81,27 +83,8 @@ export function ConnectButton({ compact = false }: { compact?: boolean } = {}) {
   const { disconnect } = useDisconnect();
   const chainId = useChainId();
   const { switchChain, status: switchStatus, error: switchError } = useSwitchChain();
-  const autoSwitchAttemptedForChain = React.useRef<number | null>(null);
-
-  const onSepolia = chainId === sepolia.id;
-
-  React.useEffect(() => {
-    if (!isConnected || !chainId) {
-      autoSwitchAttemptedForChain.current = null;
-      return;
-    }
-
-    if (chainId === sepolia.id) {
-      autoSwitchAttemptedForChain.current = null;
-      return;
-    }
-
-    if (switchStatus === "pending") return;
-    if (autoSwitchAttemptedForChain.current === chainId) return;
-
-    autoSwitchAttemptedForChain.current = chainId;
-    switchChain({ chainId: sepolia.id });
-  }, [isConnected, chainId, switchStatus, switchChain]);
+  const { environment, deployment } = useVerificationEnvironment();
+  const onSelectedChain = chainId === deployment.chainId;
 
   const walletOptions = React.useMemo(() => {
     const seen = new Set<string>();
@@ -152,7 +135,9 @@ export function ConnectButton({ compact = false }: { compact?: boolean } = {}) {
           <div className="space-y-3">
             <div>
               <div className="text-sm font-medium">Connect</div>
-              <div className="text-xs text-muted-foreground">Testnet: Sepolia</div>
+              <div className="text-xs text-muted-foreground">
+                {deployment.label}: {deployment.chainName}
+              </div>
             </div>
             <div className="space-y-2">
               {walletOptions.map(({ kind, label, connector }) => (
@@ -161,7 +146,7 @@ export function ConnectButton({ compact = false }: { compact?: boolean } = {}) {
                   variant="outline"
                   className="w-full justify-between"
                   disabled={status === "pending"}
-                  onClick={() => connect({ connector, chainId: sepolia.id })}
+                  onClick={() => connect({ connector, chainId: deployment.chainId })}
                 >
                   <span className="inline-flex items-center gap-2">
                     <WalletLogo kind={kind} />
@@ -195,7 +180,7 @@ export function ConnectButton({ compact = false }: { compact?: boolean } = {}) {
         ) : (
           <Button variant="outline" size="sm" className="gap-2">
             <span className="font-mono">{truncateAddress(address || "")}</span>
-            <Badge variant="secondary" className={onSepolia ? "" : "bg-red-500/20 text-red-300 border-red-500/30"}>
+            <Badge variant="secondary" className={onSelectedChain ? "" : "bg-red-500/20 text-red-300 border-red-500/30"}>
               {getChainLabel(chainId)}
             </Badge>
           </Button>
@@ -219,19 +204,19 @@ export function ConnectButton({ compact = false }: { compact?: boolean } = {}) {
             </div>
           </div>
 
-          {!onSepolia ? (
+          {!onSelectedChain ? (
             <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3">
               <div className="text-sm font-medium text-red-200">Wrong network</div>
               <div className="text-xs text-red-200/80">
-                Please switch to Sepolia to use testnet features.
+                Switch to {deployment.chainName} to use {environment} verification features.
               </div>
               <Button
                 className="mt-2 w-full"
                 size="sm"
-                onClick={() => switchChain({ chainId: sepolia.id })}
+                onClick={() => switchChain({ chainId: deployment.chainId })}
                 disabled={switchStatus === "pending"}
               >
-                {switchStatus === "pending" ? "Switching..." : "Switch to Sepolia"}
+                {switchStatus === "pending" ? "Switching..." : `Switch to ${deployment.chainName}`}
               </Button>
               {switchError ? (
                 <div className="mt-2 text-xs text-red-300">{switchError.message}</div>

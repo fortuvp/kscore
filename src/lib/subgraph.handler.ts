@@ -6,6 +6,7 @@ import {
     getReputationFeedbackRequestSize,
     refreshAgentFeedbackFromChain,
 } from "@/lib/reputation-feedback.server";
+import { normalizeAgentRegistrationFile } from "@/lib/agent-metadata";
 
 // Re-export types for convenience
 export type { Agent, Feedback, AgentStats, AgentWithDetails };
@@ -344,6 +345,14 @@ function isMissingAgentStatsField(error: unknown): boolean {
     );
 }
 
+function normalizeAgentMetadata<T extends Agent>(agent: T): T {
+    if (!agent.registrationFile) return agent;
+    return {
+        ...agent,
+        registrationFile: normalizeAgentRegistrationFile(agent.registrationFile),
+    };
+}
+
 // Handler functions
 export async function getAgents(params: GetAgentsParams = {}): Promise<Agent[]> {
     const {
@@ -365,7 +374,7 @@ export async function getAgents(params: GetAgentsParams = {}): Promise<Agent[]> 
         orderBy,
         orderDirection,
     });
-    return response.agents;
+    return response.agents.map(normalizeAgentMetadata);
 }
 
 export async function searchAgents(params: SearchAgentsParams): Promise<Agent[]> {
@@ -380,7 +389,7 @@ export async function searchAgents(params: SearchAgentsParams): Promise<Agent[]>
         skip,
         nameContains: query,
     });
-    return response.agents;
+    return response.agents.map(normalizeAgentMetadata);
 }
 
 export async function getAgentsByOwner(params: GetAgentsByOwnerParams): Promise<Agent[]> {
@@ -395,7 +404,7 @@ export async function getAgentsByOwner(params: GetAgentsByOwnerParams): Promise<
         first,
         skip,
     });
-    return response.agents;
+    return response.agents.map(normalizeAgentMetadata);
 }
 
 export async function getAgentWithFeedback(
@@ -414,7 +423,7 @@ export async function getAgentWithFeedback(
 
         if (!response.agent) return null;
 
-        const agent = { ...response.agent, stats: response.agentStats };
+        const agent = normalizeAgentMetadata({ ...response.agent, stats: response.agentStats });
         return skipChainRefresh ? agent : refreshAgentFeedbackFromChain(network, agent, feedbackFirst);
     } catch (error) {
         try {
@@ -424,7 +433,7 @@ export async function getAgentWithFeedback(
 
             if (!fallbackResponse.agent) return null;
 
-            const agent = { ...fallbackResponse.agent, stats: null };
+            const agent = normalizeAgentMetadata({ ...fallbackResponse.agent, stats: null });
             return skipChainRefresh ? agent : refreshAgentFeedbackFromChain(network, agent, feedbackFirst);
         } catch (fallbackError) {
             if (!isMissingAgentStatsField(error)) throw error;
@@ -456,7 +465,7 @@ export async function getAgentByAgentId(
 
         if (!response.agents || response.agents.length === 0) return null;
 
-        const agent = { ...response.agents[0], stats: response.agentStats };
+        const agent = normalizeAgentMetadata({ ...response.agents[0], stats: response.agentStats });
         return skipChainRefresh ? agent : refreshAgentFeedbackFromChain(network, agent, feedbackFirst);
     } catch (error) {
         try {
@@ -469,7 +478,7 @@ export async function getAgentByAgentId(
 
             if (!fallbackResponse.agents || fallbackResponse.agents.length === 0) return null;
 
-            const agent = { ...fallbackResponse.agents[0], stats: null };
+            const agent = normalizeAgentMetadata({ ...fallbackResponse.agents[0], stats: null });
             return skipChainRefresh ? agent : refreshAgentFeedbackFromChain(network, agent, feedbackFirst);
         } catch (fallbackError) {
             if (!isMissingAgentStatsField(error)) throw error;

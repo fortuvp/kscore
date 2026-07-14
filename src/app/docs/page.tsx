@@ -6,9 +6,9 @@ const SECTIONS = [
     id: "getting-started",
     title: "Getting Started",
     points: [
-      "Use Explore to search by name, owner, entity ID, or agent ID.",
+      "Use Explore to search by agent number.",
       "Use Compare to evaluate trust, identity, and integration features side by side.",
-      "Use Trust to monitor collateralized agents and open abuse reports.",
+      "Use Trust to monitor collateralized and challenged agents.",
     ],
   },
   {
@@ -17,16 +17,16 @@ const SECTIONS = [
     points: [
       "Collateral status is sourced from Kleros Curate.",
       "Verification is chain-aware: key0 (agent number) + key2 (CAIP-10 owner/chain context).",
-      "Abuse reports are sourced from Reality.eth and filtered by agent and chain context.",
+      "Moderation is displayed as coming soon while its public workflow is prepared.",
     ],
   },
   {
     id: "moderation-flow",
-    title: "Moderation Flow",
+    title: "Moderation (Coming Soon)",
     points: [
-      "Report abuse from an agent page when collateral is missing or concerns exist.",
-      "Answer questions and request arbitration from the moderation board.",
-      "Use evidence links and clear descriptions to improve dispute quality.",
+      "Community abuse reports are not available yet.",
+      "Reality.eth answers and arbitration actions will be enabled in a later release.",
+      "Existing verification and Curate challenge flows remain available.",
     ],
   },
   {
@@ -48,7 +48,7 @@ export default function DocsPage() {
           <BookOpen className="h-6 w-6 text-primary" />
           <h1 className="text-3xl font-bold tracking-tight">Docs</h1>
         </div>
-        <p className="text-muted-foreground">Quick reference for using discovery, trust, and moderation features.</p>
+        <p className="text-muted-foreground">Quick reference for agent discovery, verification, and trust features.</p>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[240px_1fr]">

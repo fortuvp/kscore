@@ -2,16 +2,17 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { useAccount, useBalance, useChainId, useReadContract, useWriteContract } from "wagmi";
-import { sepolia } from "wagmi/chains";
+import { useAccount, useBalance, useChainId, usePublicClient, useReadContract, useWriteContract } from "wagmi";
 import { formatEther, formatUnits } from "viem";
 
 import PermanentGTCRAbi from "@/lib/abi/PermanentGTCR.json";
 import { ERC20_ABI } from "@/lib/abi/erc20";
 import { IARBITRATOR_ABI } from "@/lib/abi/iArbitrator";
+import { executeConfirmedTransaction } from "@/lib/confirmed-transaction";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useVerificationEnvironment } from "@/components/verification-environment-provider";
 
 type RegistryApiResponse =
   | {
@@ -44,6 +45,7 @@ type ItemApiResponse =
           challenger: string;
           challengerStake: string;
           itemStake: string;
+          arbitrationSetting: { arbitratorExtraData: string };
           rounds: Array<{
             appealPeriodStart: string;
             appealPeriodEnd: string;
@@ -71,8 +73,10 @@ function formatTokenAmount(value: bigint, decimals: number | undefined, symbol: 
 }
 
 export function PgtcrDisputePanel(props: { itemID: string; className?: string }) {
+  const { environment, deployment } = useVerificationEnvironment();
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
+  const publicClient = usePublicClient({ chainId: deployment.chainId });
   const { writeContractAsync } = useWriteContract();
 
   const [registry, setRegistry] = React.useState<RegistryApiResponse | null>(null);
@@ -87,9 +91,11 @@ export function PgtcrDisputePanel(props: { itemID: string; className?: string })
     async function load() {
       setLoading(true);
       try {
+        const query = new URLSearchParams({ verificationEnvironment: environment });
+        const itemQuery = new URLSearchParams({ itemID: props.itemID, verificationEnvironment: environment });
         const [rRes, iRes] = await Promise.all([
-          fetch("/api/pgtcr/registry", { cache: "no-store" }),
-          fetch(`/api/pgtcr/item?itemID=${encodeURIComponent(props.itemID)}`, { cache: "no-store" }),
+          fetch(`/api/pgtcr/registry?${query}`, { cache: "no-store" }),
+          fetch(`/api/pgtcr/item?${itemQuery}`, { cache: "no-store" }),
         ]);
         const [rJson, iJson] = await Promise.all([
           rRes.json() as Promise<RegistryApiResponse>,
@@ -112,14 +118,20 @@ export function PgtcrDisputePanel(props: { itemID: string; className?: string })
     return () => {
       cancelled = true;
     };
-  }, [props.itemID, refreshTick]);
+  }, [environment, props.itemID, refreshTick]);
 
   const registryAddress = registry && registry.success ? (registry.registry.id as `0x${string}`) : undefined;
   const tokenAddress = registry && registry.success ? (registry.registry.token as `0x${string}`) : undefined;
   const arbitratorAddress = registry && registry.success ? (registry.registry.arbitrator.id as `0x${string}`) : undefined;
-  const arbitratorExtraData = registry && registry.success ? (registry.registry.arbitrationSettings?.[0]?.arbitratorExtraData as `0x${string}`) : undefined;
+  const latestChallenge = item && item.success && item.item ? item.item.challenges?.[0] : null;
+  const activeDispute = latestChallenge && !latestChallenge.resolutionTime ? latestChallenge : null;
+  const latestRound = activeDispute?.rounds?.[0] || null;
+  const challengeArbitratorExtraData = activeDispute?.arbitrationSetting?.arbitratorExtraData as
+    | `0x${string}`
+    | undefined;
 
   const tokenDecimals = useReadContract({
+    chainId: deployment.chainId,
     address: tokenAddress,
     abi: ERC20_ABI,
     functionName: "decimals",
@@ -127,6 +139,7 @@ export function PgtcrDisputePanel(props: { itemID: string; className?: string })
   }).data as number | undefined;
 
   const tokenSymbol = useReadContract({
+    chainId: deployment.chainId,
     address: tokenAddress,
     abi: ERC20_ABI,
     functionName: "symbol",
@@ -136,6 +149,7 @@ export function PgtcrDisputePanel(props: { itemID: string; className?: string })
   const resolvedTokenSymbol = tokenSymbol || (registry && registry.success ? registry.registry.tokenSymbol || undefined : undefined) || "TOKEN";
 
   const multiplierDivisor = useReadContract({
+    chainId: deployment.chainId,
     address: registryAddress,
     abi: PermanentGTCRAbi,
     functionName: "MULTIPLIER_DIVISOR",
@@ -143,34 +157,26 @@ export function PgtcrDisputePanel(props: { itemID: string; className?: string })
   }).data as bigint | undefined;
 
   const appealCost = useReadContract({
+    chainId: deployment.chainId,
     address: arbitratorAddress,
     abi: IARBITRATOR_ABI,
     functionName: "appealCost",
     args:
-      item &&
-      item.success &&
-      item.item &&
-      item.item.challenges?.[0] &&
-      !item.item.challenges[0].resolutionTime &&
-      arbitratorExtraData
-        ? [BigInt(item.item.challenges[0].disputeID || "0"), arbitratorExtraData]
+      activeDispute && challengeArbitratorExtraData
+        ? [BigInt(activeDispute.disputeID || "0"), challengeArbitratorExtraData]
         : undefined,
     query: {
       enabled: Boolean(
-        item &&
-          item.success &&
-          item.item &&
-          item.item.challenges?.[0] &&
-          !item.item.challenges[0].resolutionTime &&
+        activeDispute &&
           arbitratorAddress &&
-          arbitratorExtraData
+          challengeArbitratorExtraData
       ),
     },
   }).data as bigint | undefined;
 
   const nativeBalance = useBalance({
     address,
-    chainId: sepolia.id,
+    chainId: deployment.chainId,
     query: { enabled: Boolean(address) },
   }).data?.value;
 
@@ -181,9 +187,6 @@ export function PgtcrDisputePanel(props: { itemID: string; className?: string })
     return mulDiv(itemStake, challengeStakeMultiplier, multiplierDivisor);
   }, [itemStake, challengeStakeMultiplier, multiplierDivisor]);
 
-  const latestChallenge = item && item.success && item.item ? item.item.challenges?.[0] : null;
-  const activeDispute = latestChallenge && !latestChallenge.resolutionTime ? latestChallenge : null;
-  const latestRound = activeDispute?.rounds?.[0] || null;
   const nowSec = Math.floor(Date.now() / 1000);
 
   const winnerStakeMultiplier = registry && registry.success ? BigInt(registry.registry.winnerStakeMultiplier || "0") : 0n;
@@ -272,11 +275,11 @@ export function PgtcrDisputePanel(props: { itemID: string; className?: string })
       toast.error("Connect your wallet.");
       return;
     }
-    if (chainId !== sepolia.id) {
-      toast.error("Switch to Sepolia.");
+    if (chainId !== deployment.chainId) {
+      toast.error(`Switch to ${deployment.chainName}.`);
       return;
     }
-    if (!registryAddress || !activeDispute) {
+    if (!publicClient || !registryAddress || !activeDispute) {
       toast.error("No active dispute.");
       return;
     }
@@ -289,14 +292,23 @@ export function PgtcrDisputePanel(props: { itemID: string; className?: string })
 
     setSubmitting(true);
     try {
-      await writeContractAsync({
-        address: registryAddress,
-        abi: PermanentGTCRAbi,
-        functionName: "fundAppeal",
-        args: [props.itemID as `0x${string}`, side],
-        value: fundingState.remaining,
+      toast.message("Checking appeal contribution and waiting for confirmation…");
+      await executeConfirmedTransaction({
+        simulate: async () =>
+          (
+            await publicClient.simulateContract({
+              account: address,
+              address: registryAddress,
+              abi: PermanentGTCRAbi,
+              functionName: "fundAppeal",
+              args: [props.itemID as `0x${string}`, side],
+              value: fundingState.remaining,
+            })
+          ).request,
+        write: (request) => writeContractAsync(request),
+        wait: (hash) => publicClient.waitForTransactionReceipt({ hash }),
       });
-      toast.success("Appeal contribution sent.");
+      toast.success("Appeal contribution confirmed.");
       setRefreshTick((value) => value + 1);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Funding failed");
@@ -328,7 +340,7 @@ export function PgtcrDisputePanel(props: { itemID: string; className?: string })
           </div>
         </div>
         <Button asChild size="sm" variant="outline" className="border-amber-400/35 bg-transparent text-amber-100 hover:bg-amber-400/10">
-          <a href={`https://klerosboard.com/#!/dispute/${sepolia.id}/${activeDispute.disputeID}`} target="_blank" rel="noreferrer">
+          <a href={`https://klerosboard.com/#!/dispute/${deployment.chainId}/${activeDispute.disputeID}`} target="_blank" rel="noreferrer">
             Klerosboard
           </a>
         </Button>
@@ -388,9 +400,9 @@ export function PgtcrDisputePanel(props: { itemID: string; className?: string })
         {requesterState.remaining > 0n ? <div>Requester side remaining: {formatEther(requesterState.remaining)} ETH</div> : null}
         {challengerState.remaining > 0n ? <div>Challenger side remaining: {formatEther(challengerState.remaining)} ETH</div> : null}
         {!isConnected ? <div>Connect your wallet to fund an appeal.</div> : null}
-        {isConnected && chainId !== sepolia.id ? <div className="text-red-200">Wrong network. Switch to Sepolia.</div> : null}
+        {isConnected && chainId !== deployment.chainId ? <div className="text-red-200">Wrong network. Switch to {deployment.chainName}.</div> : null}
         {isConnected &&
-        chainId === sepolia.id &&
+        chainId === deployment.chainId &&
         nativeBalance !== undefined &&
         (requesterState.reason === "Insufficient ETH balance." || challengerState.reason === "Insufficient ETH balance.") ? (
           <div className="text-red-200">Insufficient balance.</div>

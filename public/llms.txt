@@ -1,0 +1,8 @@
+# DEX8004 Verified Agents skills
+
+> Registry-specific, submission-first instructions for the Verified Agents Stake Curate / PermanentGTCR / PGTCR registries.
+
+- [Verified Agents · Sepolia](http://localhost:3000/skills/verified-agents-sepolia/SKILL.md): Submit ERC-8004 agents to, inspect, challenge, appeal, provide evidence for, or withdraw from the Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum Sepolia. Use for testnet Verified Agents registry operations, submission drafting, duplicate checks, policy and schema validation, live stake or arbitration-cost reads, and PGTCR dispute lifecycle work at registry 0x3162df9669affa8b6b6ff2147afa052249f00447. Installable bundle: http://localhost:3000/skills/verified-agents-sepolia.tar.gz
+- [Verified Agents · Mainnet](http://localhost:3000/skills/verified-agents-mainnet/SKILL.md): Submit ERC-8004 agents to, inspect, challenge, appeal, provide evidence for, or withdraw from the Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum mainnet. Use for production Verified Agents registry operations, submission drafting, duplicate checks, policy and schema validation, live stake or arbitration-cost reads, and PGTCR dispute lifecycle work at registry 0x118155741eea23f56b3bd59b0c1342d5daaa6d07. Installable bundle: http://localhost:3000/skills/verified-agents-mainnet.tar.gz
+
+Discovery index: http://localhost:3000/.well-known/agent-skills/index.json

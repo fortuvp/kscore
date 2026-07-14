@@ -51,9 +51,11 @@ Create `.env` (see existing patterns in the repo) with at least:
 ```bash
 # WalletConnect (optional, enables WalletConnect button)
 NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
 
 # Optional: custom Sepolia RPC
 NEXT_PUBLIC_SEPOLIA_RPC_URL=https://ethereum-sepolia.publicnode.com
+NEXT_PUBLIC_ETHEREUM_RPC_URL=https://ethereum-rpc.publicnode.com
 
 # Optional: dedicated server-side RPCs for reputation freshness fallback
 SEPOLIA_RPC_URL=
@@ -162,9 +164,20 @@ src/
 - Kleros Escrow (Marketplace): `0x338f1A474e0FB0ae9E913cFA3d7c6Aa19b92015B`
 - Reality proxy (arbitrator): `0x05B942fAEcfB3924970E3A28e0F230910CEDFF45`
 
-## Kleros Curate toggle (GTCR vs PGTCR)
+## Verified Agents registry environments
 
-This demo supports **two different Curate backends**, toggled via env:
+The header’s Testnet/Mainnet selector controls only the Kleros verification registry; it does not change the ERC-8004 source chain selected while browsing agents.
+
+- **Testnet:** Stake Curate / PermanentGTCR on Sepolia at `0x3162df9669affa8b6b6ff2147afa052249f00447`.
+- **Mainnet:** Stake Curate / PermanentGTCR on Ethereum at `0x118155741eea23f56b3bd59b0c1342d5daaa6d07`.
+
+Use `PGTCR_SEPOLIA_*` and `PGTCR_MAINNET_*` for server overrides and the matching `NEXT_PUBLIC_PGTCR_*_REGISTRY_ADDRESS` settings for wallet-facing configuration. The older unsuffixed `PGTCR_REGISTRY_ADDRESS` and `PGTCR_GOLDSKY_SUBGRAPH_URL` settings remain Sepolia aliases.
+
+The registry-specific local LLM skills live under `skills/`. Run `npm run skills:publish` to generate the public bundles and discovery files with `NEXT_PUBLIC_SITE_URL`, or `npm run skills:check` to detect drift.
+
+## Legacy Kleros Curate configuration
+
+Older integrations support **two different Curate backends**, toggled via env. The Verified Agents product flow uses the PGTCR deployments above and no longer depends on this process-global toggle:
 
 - **GTCR (Light Curate, Envio-indexed)**: items come from `LItem` and the agent is considered verified when `status === Registered`.
 - **PGTCR (Permanent GTCR / Stake Curate, Goldsky)**: items come from `Item` and the frontend "Accepted" badge is computed **off-chain**.

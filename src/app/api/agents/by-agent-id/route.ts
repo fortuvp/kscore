@@ -9,6 +9,9 @@ import {
 import { getCurateFallbackAgentByAgentId } from "@/lib/curate-agent-fallback.server";
 import { getSepoliaIdentityRegistryFallbackAgentByAgentId } from "@/lib/identity-registry-fallback.server";
 import type { AgentWithDetails } from "@/types/agent";
+import { mergeAgentMetadataSources } from "@/lib/agent-metadata";
+import { getVerificationEnvironmentFromSearchParams } from "@/lib/verification-environment";
+import { getPgtcrDeployment } from "@/lib/curate-config";
 
 const SUBGRAPH_LOOKUP_TIMEOUT_MS = 6000;
 const FAST_LOOKUP_TIMEOUT_MS = 3000;
@@ -95,8 +98,10 @@ async function resolveAgentByAgentId(
 }
 
 export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const verificationEnvironment = getVerificationEnvironmentFromSearchParams(url.searchParams);
+  const verificationChainId = getPgtcrDeployment(verificationEnvironment).chainId;
   try {
-    const url = new URL(req.url);
     const agentIdParam = url.searchParams.get("agentId")?.trim();
     const rawNetwork = url.searchParams.get("network");
     const fresh = parseFreshParam(url.searchParams.get("fresh"));
@@ -105,7 +110,7 @@ export async function GET(req: Request) {
     if (rawNetwork) {
       if (!isAgentSubgraphNetwork(rawNetwork)) {
         return NextResponse.json(
-          { success: false, error: `Invalid network '${rawNetwork}'` },
+          { success: false, error: `Invalid network '${rawNetwork}'`, verificationEnvironment, verificationChainId },
           { status: 400 }
         );
       }
@@ -114,7 +119,7 @@ export async function GET(req: Request) {
 
     if (!agentIdParam) {
       return NextResponse.json(
-        { success: false, error: "Missing agentId" },
+        { success: false, error: "Missing agentId", verificationEnvironment, verificationChainId },
         { status: 400 }
       );
     }
@@ -122,22 +127,28 @@ export async function GET(req: Request) {
     const [resolved, curateFallback] = await Promise.all([
       resolveAgentByAgentId(agentIdParam, requestedNetwork, fresh),
       withTimeout(
-        getCurateFallbackAgentByAgentId(agentIdParam, requestedNetwork, 10, { skipChainRefresh: !fresh }),
+        getCurateFallbackAgentByAgentId(agentIdParam, requestedNetwork, 10, {
+          skipChainRefresh: !fresh,
+          verificationEnvironment,
+        }),
         fresh ? SUBGRAPH_LOOKUP_TIMEOUT_MS : FAST_LOOKUP_TIMEOUT_MS,
         null
       ),
     ]);
 
-    const bestResolvedAgent =
-      curateFallback?.agent && getFeedbackScore(curateFallback.agent) > getFeedbackScore(resolved.agent)
-        ? curateFallback.agent
-        : resolved.agent;
+    const curateHasBetterFeedback =
+      curateFallback?.agent && getFeedbackScore(curateFallback.agent) > getFeedbackScore(resolved.agent);
+    const preferredAgent = curateHasBetterFeedback ? curateFallback?.agent || null : resolved.agent;
+    const secondaryAgent = curateHasBetterFeedback ? resolved.agent : curateFallback?.agent || null;
+    const bestResolvedAgent = preferredAgent
+      ? mergeAgentMetadataSources(preferredAgent, secondaryAgent)
+      : null;
     const bestResolvedNetwork =
-      curateFallback?.agent && getFeedbackScore(curateFallback.agent) > getFeedbackScore(resolved.agent)
+      curateHasBetterFeedback
         ? curateFallback.network
         : resolved.network;
     const bestResolvedAgentId =
-      curateFallback?.agent && getFeedbackScore(curateFallback.agent) > getFeedbackScore(resolved.agent)
+      curateHasBetterFeedback
         ? curateFallback.agent.agentId
         : resolved.agentId;
 
@@ -149,6 +160,8 @@ export async function GET(req: Request) {
         requestedNetwork,
         agentId: bestResolvedAgentId,
         item: bestResolvedAgent,
+        verificationEnvironment,
+        verificationChainId,
       });
     }
 
@@ -160,6 +173,8 @@ export async function GET(req: Request) {
         requestedNetwork,
         agentId: curateFallback.agent.agentId,
         item: curateFallback.agent,
+        verificationEnvironment,
+        verificationChainId,
       });
     }
 
@@ -180,6 +195,8 @@ export async function GET(req: Request) {
         requestedNetwork,
         agentId: sepoliaFallback.agentId,
         item: sepoliaFallback,
+        verificationEnvironment,
+        verificationChainId,
       });
     }
 
@@ -190,11 +207,18 @@ export async function GET(req: Request) {
       requestedNetwork,
       agentId: agentIdParam,
       item: null,
+      verificationEnvironment,
+      verificationChainId,
       checked: resolved.checked,
     });
   } catch (e) {
     return NextResponse.json(
-      { success: false, error: e instanceof Error ? e.message : "Unknown error" },
+      {
+        success: false,
+        error: e instanceof Error ? e.message : "Unknown error",
+        verificationEnvironment,
+        verificationChainId,
+      },
       { status: 500 }
     );
   }

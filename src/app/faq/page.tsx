@@ -11,12 +11,12 @@ const FAQS = [
     a: "Agent IDs can exist across networks. Trust checks in this explorer match both agent number (key0) and chain context (key2/CAIP) to avoid cross-chain confusion.",
   },
   {
-    q: "How are abuse reports linked to an agent?",
-    a: "Reports are created on Reality.eth. Matching uses the embedded agent ID and chain context in the question payload whenever available.",
+    q: "Is community moderation available?",
+    a: "Not yet. Moderation is visible as coming soon while reporting, answer, and arbitration policies are prepared.",
   },
   {
     q: "What is the difference between Trust and Moderation?",
-    a: "Trust combines collateral and abuse signals. Moderation is the full Reality.eth workflow to review, answer, and arbitrate abuse claims.",
+    a: "Trust currently shows Curate verification status. Moderation will add the community reporting workflow in a later release.",
   },
   {
     q: "Why do rankings change after refresh?",
@@ -32,7 +32,7 @@ export default function FaqPage() {
           <HelpCircle className="h-6 w-6 text-primary" />
           <h1 className="text-3xl font-bold tracking-tight">FAQ</h1>
         </div>
-        <p className="text-muted-foreground">Core questions about trust, moderation, and multi-chain agent discovery.</p>
+        <p className="text-muted-foreground">Core questions about verification and multi-chain agent discovery.</p>
       </div>
 
       <div className="space-y-3">

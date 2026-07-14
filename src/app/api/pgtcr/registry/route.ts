@@ -1,27 +1,28 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createPublicClient, http } from "viem";
-import { sepolia } from "viem/chains";
+import { mainnet, sepolia } from "viem/chains";
 import { ERC20_ABI } from "@/lib/abi/erc20";
 import { fetchPgtcrRegistryInfo } from "@/lib/pgtcr-subgraph";
+import { getPgtcrDeployment } from "@/lib/curate-config";
+import { getVerificationEnvironmentFromSearchParams } from "@/lib/verification-environment";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const verificationEnvironment = getVerificationEnvironmentFromSearchParams(request.nextUrl.searchParams);
   try {
-    const registry = await fetchPgtcrRegistryInfo();
+    const deployment = getPgtcrDeployment(verificationEnvironment);
+    const registry = await fetchPgtcrRegistryInfo(verificationEnvironment);
     const tokenAddress = registry?.token as `0x${string}` | undefined;
     let tokenSymbol: string | null = null;
     let tokenDecimals: number | null = null;
 
     if (tokenAddress) {
-      const rpcUrls = [
-        process.env.SEPOLIA_RPC_URL?.trim(),
-        process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL?.trim(),
-        sepolia.rpcUrls.default.http[0],
-      ].filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index);
+      const rpcUrls = deployment.rpcUrls;
+      const chain = verificationEnvironment === "mainnet" ? mainnet : sepolia;
 
       for (const rpcUrl of rpcUrls) {
         try {
           const client = createPublicClient({
-            chain: sepolia,
+            chain,
             transport: http(rpcUrl),
           });
           const [symbol, decimals] = await Promise.all([
@@ -47,8 +48,13 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
+      verificationEnvironment,
+      chainId: deployment.chainId,
+      registryAddress: deployment.registryAddress,
       registry: {
         ...registry,
+        verificationEnvironment,
+        chainId: deployment.chainId,
         tokenSymbol,
         tokenDecimals,
       },

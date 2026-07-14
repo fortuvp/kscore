@@ -14,7 +14,7 @@ export async function generateMetadata({
 
   return {
     title,
-    description: "ERC-8004 agent profile with reviews, validations, moderation context, and compliance checks.",
+    description: "ERC-8004 agent profile with reviews, validations, verification status, and compliance checks.",
     openGraph: {
       title,
       description: "ERC-8004 agent profile with trust signals.",
@@ -32,4 +32,3 @@ export async function generateMetadata({
 export default function AgentLayout({ children }: { children: React.ReactNode }) {
   return children;
 }
-

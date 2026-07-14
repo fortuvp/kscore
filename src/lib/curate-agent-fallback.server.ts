@@ -2,7 +2,7 @@ import "server-only";
 
 import { GraphQLClient, gql } from "graphql-request";
 import type { AgentSubgraphNetwork } from "@/lib/agent-networks";
-import { getCurateMode, getCurateRegistryAddress, getCurateSubgraphUrl, getGoldskyApiKey } from "@/lib/curate-config";
+import { getGoldskyApiKey, getPgtcrDeployment } from "@/lib/curate-config";
 import { lookupCurateItemByAgentId } from "@/lib/kleros-curate";
 import { fetchPgtcrItemByItemIdBytes } from "@/lib/pgtcr-subgraph";
 import {
@@ -12,7 +12,11 @@ import {
   parseCaip10Owner,
 } from "@/lib/curate-agent-fallback";
 import { refreshAgentFeedbackFromChain } from "@/lib/reputation-feedback.server";
-import type { AgentWithDetails, AgentRegistrationFile } from "@/types/agent";
+import type { AgentWithDetails } from "@/types/agent";
+import {
+  DEFAULT_VERIFICATION_ENVIRONMENT,
+  type VerificationEnvironment,
+} from "@/lib/verification-environment";
 
 type CurateSearchItem = {
   itemID: string;
@@ -56,18 +60,15 @@ const GET_RECENT_PGTCR_ITEMS = gql`
 const RECENT_ITEMS_CACHE_TTL_MS = 60_000;
 const RECENT_ITEMS_LIMIT = 160;
 
-let recentItemsCache:
-  | {
-      expiresAt: number;
-      items: CurateSearchItem[];
-    }
-  | null = null;
+const recentItemsCache = new Map<
+  VerificationEnvironment,
+  { expiresAt: number; items: CurateSearchItem[] }
+>();
+const recentItemsRequest = new Map<VerificationEnvironment, Promise<CurateSearchItem[]>>();
 
-const registrationFileCache = new Map<string, Promise<AgentRegistrationFile | null>>();
-
-function makeCurateClient() {
-  const url = getCurateSubgraphUrl("pgtcr");
-  const apiKey = getGoldskyApiKey();
+function makeCurateClient(verificationEnvironment: VerificationEnvironment) {
+  const url = getPgtcrDeployment(verificationEnvironment).subgraphUrl;
+  const apiKey = getGoldskyApiKey(verificationEnvironment);
   return new GraphQLClient(url, apiKey ? { headers: { "x-api-key": apiKey } } : undefined);
 }
 
@@ -104,58 +105,64 @@ function matchesNetwork(item: CurateSearchItem, requestedNetwork?: AgentSubgraph
 async function getCachedRegistrationFile(uri: string | null | undefined) {
   const trimmed = uri?.trim();
   if (!trimmed) return null;
-
-  const existing = registrationFileCache.get(trimmed);
-  if (existing) return existing;
-
-  const request = loadCurateRegistrationFile(trimmed);
-  registrationFileCache.set(trimmed, request);
-  return request;
+  return loadCurateRegistrationFile(trimmed);
 }
 
-async function getRecentAcceptedCurateItems() {
-  if (getCurateMode() !== "pgtcr") return [] as CurateSearchItem[];
-
+async function getRecentAcceptedCurateItems(
+  verificationEnvironment: VerificationEnvironment = DEFAULT_VERIFICATION_ENVIRONMENT
+) {
   const now = Date.now();
-  if (recentItemsCache && recentItemsCache.expiresAt > now) {
-    return recentItemsCache.items;
+  const cached = recentItemsCache.get(verificationEnvironment);
+  if (cached && cached.expiresAt > now) {
+    return cached.items;
   }
+  const pending = recentItemsRequest.get(verificationEnvironment);
+  if (pending) return pending;
 
-  const client = makeCurateClient();
-  const registry = getCurateRegistryAddress("pgtcr").toLowerCase();
-  const response = await client.request<{ items: CurateSearchItem[] }>(GET_RECENT_PGTCR_ITEMS, {
-    registry,
-    limit: RECENT_ITEMS_LIMIT,
-  });
+  const request = (async () => {
+    const client = makeCurateClient(verificationEnvironment);
+    const registry = getPgtcrDeployment(verificationEnvironment).registryAddress.toLowerCase();
+    const response = await client.request<{ items: CurateSearchItem[] }>(GET_RECENT_PGTCR_ITEMS, {
+      registry,
+      limit: RECENT_ITEMS_LIMIT,
+    });
 
-  const deduped = new Map<string, CurateSearchItem>();
-  for (const item of response?.items || []) {
-    if (
-      !isPgtcrAccepted(
-        item.status,
-        item.includedAt,
-        item.registry?.submissionPeriod,
-        item.registry?.reinclusionPeriod
-      )
-    ) {
-      continue;
+    const deduped = new Map<string, CurateSearchItem>();
+    for (const item of response?.items || []) {
+      if (
+        !isPgtcrAccepted(
+          item.status,
+          item.includedAt,
+          item.registry?.submissionPeriod,
+          item.registry?.reinclusionPeriod
+        )
+      ) {
+        continue;
+      }
+
+      const key0 = item.metadata?.key0?.trim();
+      if (!key0) continue;
+
+      const network = parseCaip10Owner(item.metadata?.key2 || null).network || "sepolia";
+      const dedupeKey = `${network}:${key0}`;
+      if (deduped.has(dedupeKey)) continue;
+      deduped.set(dedupeKey, item);
     }
 
-    const key0 = item.metadata?.key0?.trim();
-    if (!key0) continue;
+    const items = Array.from(deduped.values());
+    recentItemsCache.set(verificationEnvironment, {
+      expiresAt: Date.now() + RECENT_ITEMS_CACHE_TTL_MS,
+      items,
+    });
+    return items;
+  })();
+  recentItemsRequest.set(verificationEnvironment, request);
 
-    const network = parseCaip10Owner(item.metadata?.key2 || null).network || "sepolia";
-    const dedupeKey = `${network}:${key0}`;
-    if (deduped.has(dedupeKey)) continue;
-    deduped.set(dedupeKey, item);
+  try {
+    return await request;
+  } finally {
+    recentItemsRequest.delete(verificationEnvironment);
   }
-
-  const items = Array.from(deduped.values());
-  recentItemsCache = {
-    expiresAt: now + RECENT_ITEMS_CACHE_TTL_MS,
-    items,
-  };
-  return items;
 }
 
 async function buildFallbackAgentFromCurateItem(item: CurateSearchItem, fallbackNetwork?: AgentSubgraphNetwork | null) {
@@ -193,20 +200,24 @@ export async function getCurateFallbackAgentByAgentId(
   agentIdLike: string,
   network?: AgentSubgraphNetwork | null,
   feedbackFirst = 10,
-  options?: { skipChainRefresh?: boolean }
+  options?: {
+    skipChainRefresh?: boolean;
+    verificationEnvironment?: VerificationEnvironment;
+  }
 ) {
   try {
-    if (getCurateMode() !== "pgtcr") return null;
+    const verificationEnvironment = options?.verificationEnvironment || DEFAULT_VERIFICATION_ENVIRONMENT;
 
     const agentId = extractCurateAgentNumber(agentIdLike);
     if (!agentId) return null;
 
     const lookup = await lookupCurateItemByAgentId(agentId, {
       network: network || undefined,
+      verificationEnvironment,
     });
     if (!lookup.found || !lookup.itemID) return null;
 
-    const item = await fetchPgtcrItemByItemIdBytes(lookup.itemID);
+    const item = await fetchPgtcrItemByItemIdBytes(lookup.itemID, verificationEnvironment);
     if (!item) return null;
 
     const inferredNetwork = parseCaip10Owner(item.metadata?.key2 || null).network || network || "sepolia";
@@ -242,10 +253,11 @@ export async function searchCurateFallbackAgents(params: {
   query: string;
   network?: AgentSubgraphNetwork | null;
   first?: number;
+  verificationEnvironment?: VerificationEnvironment;
 }) {
   try {
-    const { query, network, first = 24 } = params;
-    const items = await getRecentAcceptedCurateItems();
+    const { query, network, first = 24, verificationEnvironment = DEFAULT_VERIFICATION_ENVIRONMENT } = params;
+    const items = await getRecentAcceptedCurateItems(verificationEnvironment);
     const filtered = items.filter((item) => matchesNetwork(item, network));
     const agents = await Promise.all(
       filtered.map((item) => buildFallbackAgentFromCurateItem(item, network))
@@ -264,10 +276,16 @@ export async function listCurateFallbackAgents(params: {
   network?: AgentSubgraphNetwork | null;
   first?: number;
   skip?: number;
+  verificationEnvironment?: VerificationEnvironment;
 }) {
   try {
-    const { network, first = 20, skip = 0 } = params;
-    const items = await getRecentAcceptedCurateItems();
+    const {
+      network,
+      first = 20,
+      skip = 0,
+      verificationEnvironment = DEFAULT_VERIFICATION_ENVIRONMENT,
+    } = params;
+    const items = await getRecentAcceptedCurateItems(verificationEnvironment);
     const filtered = items.filter((item) => matchesNetwork(item, network));
     const paged = filtered.slice(skip, skip + first);
     const agents = await Promise.all(
@@ -280,9 +298,12 @@ export async function listCurateFallbackAgents(params: {
   }
 }
 
-export async function getAcceptedCurateAgentIds(network?: AgentSubgraphNetwork | null) {
+export async function getAcceptedCurateAgentIds(
+  network?: AgentSubgraphNetwork | null,
+  verificationEnvironment: VerificationEnvironment = DEFAULT_VERIFICATION_ENVIRONMENT
+) {
   try {
-    const items = await getRecentAcceptedCurateItems();
+    const items = await getRecentAcceptedCurateItems(verificationEnvironment);
     return items
       .filter((item) => matchesNetwork(item, network))
       .map((item) => item.metadata?.key0?.trim() || "")

@@ -1,23 +1,22 @@
 import "server-only";
 
-import { createPublicClient, http, parseAbi, parseAbiItem } from "viem";
+import { createPublicClient, http, parseAbi } from "viem";
 import { sepolia } from "viem/chains";
 
 import { AGENT_NETWORK_CHAIN_IDS } from "@/lib/agent-networks";
 import { loadCurateRegistrationFile } from "@/lib/curate-agent-fallback";
 import { refreshAgentFeedbackFromChain } from "@/lib/reputation-feedback.server";
 import type { OrderBy, OrderDirection } from "@/lib/subgraph.handler";
-import type { AgentRegistrationFile, AgentWithDetails } from "@/types/agent";
+import type { AgentWithDetails } from "@/types/agent";
 
-const SEPOLIA_REGISTRY_START_BLOCK = 9_989_509n;
-const LOG_BLOCK_RANGE = 50_000n;
+const IDENTITY_REGISTRY_STORAGE_SLOT =
+  "0xa040f782729de4970518741823ec1276cbcd41a0c7493f62d173341566a04e00" as const;
 const INDEX_CACHE_TTL_MS = 5 * 60_000;
-const LOG_REQUEST_CONCURRENCY = 4;
+const OWNER_INDEX_CACHE_TTL_MS = 5 * 60_000;
+const REGISTRATION_FETCH_TIMEOUT_MS = 4_000;
 const SEARCH_SCAN_LIMIT = 300;
-
-const REGISTERED_EVENT = parseAbiItem(
-  "event Registered(uint256 indexed agentId, string agentURI, address indexed owner)"
-);
+const OWNER_BATCH_SIZE = 400;
+const OWNER_BATCH_CONCURRENCY = 4;
 
 const IDENTITY_REGISTRY_ABI = parseAbi([
   "function ownerOf(uint256 agentId) view returns (address)",
@@ -26,9 +25,7 @@ const IDENTITY_REGISTRY_ABI = parseAbi([
 
 type SepoliaRegistryStub = {
   agentId: string;
-  owner: string;
-  agentURI: string | null;
-  blockNumber: bigint;
+  sequence: bigint;
 };
 
 let registeredIndexCache:
@@ -37,9 +34,15 @@ let registeredIndexCache:
       items: SepoliaRegistryStub[];
     }
   | null = null;
+let registeredIndexPromise: Promise<SepoliaRegistryStub[]> | null = null;
 
-const registrationFileCache = new Map<string, Promise<AgentRegistrationFile | null>>();
-const blockTimestampCache = new Map<string, Promise<number>>();
+let ownerIndexCache:
+  | {
+      expiresAt: number;
+      items: Map<string, SepoliaRegistryStub[]>;
+    }
+  | null = null;
+let ownerIndexPromise: Promise<Map<string, SepoliaRegistryStub[]>> | null = null;
 
 function getSepoliaRpcUrl() {
   return process.env.SEPOLIA_RPC_URL?.trim() || process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL?.trim() || null;
@@ -55,7 +58,7 @@ function getSepoliaClient() {
   if (!rpcUrl) return null;
   return createPublicClient({
     chain: sepolia,
-    transport: http(rpcUrl),
+    transport: http(rpcUrl, { retryCount: 1, timeout: 5_000 }),
   });
 }
 
@@ -64,11 +67,7 @@ function normalizeOptionalString(value: string | null | undefined) {
   return trimmed ? trimmed : null;
 }
 
-function compareBigInt(
-  a: bigint,
-  b: bigint,
-  orderDirection: OrderDirection
-) {
+function compareBigInt(a: bigint, b: bigint, orderDirection: OrderDirection) {
   if (a === b) return 0;
   if (orderDirection === "asc") return a < b ? -1 : 1;
   return a > b ? -1 : 1;
@@ -77,55 +76,76 @@ function compareBigInt(
 function compareStubs(
   a: SepoliaRegistryStub,
   b: SepoliaRegistryStub,
-  orderBy: OrderBy,
+  _orderBy: OrderBy,
   orderDirection: OrderDirection
 ) {
-  const primary =
-    orderBy === "createdAt" || orderBy === "updatedAt" || orderBy === "lastActivity" || orderBy === "totalFeedback"
-      ? compareBigInt(a.blockNumber, b.blockNumber, orderDirection)
-      : compareBigInt(a.blockNumber, b.blockNumber, orderDirection);
+  const primary = compareBigInt(a.sequence, b.sequence, orderDirection);
   if (primary !== 0) return primary;
   return orderDirection === "asc" ? a.agentId.localeCompare(b.agentId) : b.agentId.localeCompare(a.agentId);
-}
-
-function buildBlockRanges(head: bigint) {
-  const ranges: Array<{ fromBlock: bigint; toBlock: bigint }> = [];
-  for (
-    let fromBlock = SEPOLIA_REGISTRY_START_BLOCK;
-    fromBlock <= head;
-    fromBlock += LOG_BLOCK_RANGE + 1n
-  ) {
-    ranges.push({
-      fromBlock,
-      toBlock: fromBlock + LOG_BLOCK_RANGE > head ? head : fromBlock + LOG_BLOCK_RANGE,
-    });
-  }
-  return ranges;
 }
 
 async function getCachedRegistrationFile(uri: string | null | undefined) {
   const trimmed = normalizeOptionalString(uri);
   if (!trimmed) return null;
-
-  const existing = registrationFileCache.get(trimmed);
-  if (existing) return existing;
-
-  const request = loadCurateRegistrationFile(trimmed);
-  registrationFileCache.set(trimmed, request);
-  return request;
+  return loadCurateRegistrationFile(trimmed, REGISTRATION_FETCH_TIMEOUT_MS);
 }
 
-async function getBlockTimestamp(
+async function registryAgentExists(
   client: ReturnType<typeof createPublicClient>,
-  blockNumber: bigint
+  registryAddress: `0x${string}`,
+  agentId: bigint
 ) {
-  const key = String(blockNumber);
-  const existing = blockTimestampCache.get(key);
-  if (existing) return existing;
+  try {
+    await client.readContract({
+      address: registryAddress,
+      abi: IDENTITY_REGISTRY_ABI,
+      functionName: "ownerOf",
+      args: [agentId],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  const request = client.getBlock({ blockNumber }).then((block) => Number(block.timestamp));
-  blockTimestampCache.set(key, request);
-  return request;
+async function findRegistryCountByBinarySearch(
+  client: ReturnType<typeof createPublicClient>,
+  registryAddress: `0x${string}`
+) {
+  if (!(await registryAgentExists(client, registryAddress, 0n))) return 0;
+
+  let upper = 1n;
+  while (await registryAgentExists(client, registryAddress, upper)) {
+    upper *= 2n;
+  }
+
+  let lower = upper / 2n;
+  while (lower < upper) {
+    const middle = (lower + upper) / 2n;
+    if (await registryAgentExists(client, registryAddress, middle)) lower = middle + 1n;
+    else upper = middle;
+  }
+  return Number(lower);
+}
+
+async function readRegistryCount(
+  client: ReturnType<typeof createPublicClient>,
+  registryAddress: `0x${string}`
+) {
+  try {
+    const raw = await client.getStorageAt({
+      address: registryAddress,
+      slot: IDENTITY_REGISTRY_STORAGE_SLOT,
+    });
+    if (raw) {
+      const value = BigInt(raw);
+      if (value >= 0n && value <= BigInt(Number.MAX_SAFE_INTEGER)) return Number(value);
+    }
+  } catch {
+    // Older deployments can still be enumerated through ownerOf below.
+  }
+
+  return findRegistryCountByBinarySearch(client, registryAddress);
 }
 
 async function fetchRegisteredIndex() {
@@ -133,32 +153,11 @@ async function fetchRegisteredIndex() {
   const registryAddress = getSepoliaRegistryAddress();
   if (!client || !registryAddress) return [] as SepoliaRegistryStub[];
 
-  const head = await client.getBlockNumber();
-  const ranges = buildBlockRanges(head);
-  const logs: Awaited<ReturnType<typeof client.getLogs<typeof REGISTERED_EVENT>>> = [];
-
-  for (let index = 0; index < ranges.length; index += LOG_REQUEST_CONCURRENCY) {
-    const batch = await Promise.all(
-      ranges.slice(index, index + LOG_REQUEST_CONCURRENCY).map(({ fromBlock, toBlock }) =>
-        client.getLogs({
-          address: registryAddress,
-          event: REGISTERED_EVENT,
-          fromBlock,
-          toBlock,
-        })
-      )
-    );
-    for (const group of batch) logs.push(...group);
-  }
-
-  return logs
-    .map((log) => ({
-      agentId: String(log.args.agentId),
-      owner: String(log.args.owner),
-      agentURI: normalizeOptionalString(log.args.agentURI),
-      blockNumber: log.blockNumber,
-    }))
-    .sort((a, b) => compareBigInt(b.blockNumber, a.blockNumber, "asc"));
+  const count = await readRegistryCount(client, registryAddress);
+  return Array.from({ length: count }, (_, index) => ({
+    agentId: String(index),
+    sequence: BigInt(index),
+  }));
 }
 
 async function getRegisteredIndex() {
@@ -166,33 +165,21 @@ async function getRegisteredIndex() {
   if (registeredIndexCache && registeredIndexCache.expiresAt > now) {
     return registeredIndexCache.items;
   }
+  if (registeredIndexPromise) return registeredIndexPromise;
 
-  const items = await fetchRegisteredIndex();
-  registeredIndexCache = {
-    expiresAt: now + INDEX_CACHE_TTL_MS,
-    items,
-  };
-  return items;
-}
+  registeredIndexPromise = fetchRegisteredIndex()
+    .then((items) => {
+      registeredIndexCache = {
+        expiresAt: Date.now() + INDEX_CACHE_TTL_MS,
+        items,
+      };
+      return items;
+    })
+    .finally(() => {
+      registeredIndexPromise = null;
+    });
 
-function isStructuredQuery(query: string) {
-  return (
-    /^\d+$/.test(query) ||
-    query.startsWith("0x") ||
-    query.startsWith("eip155:") ||
-    query.includes("://") ||
-    query.includes("/ipfs/")
-  );
-}
-
-function matchesStubQuery(stub: SepoliaRegistryStub, query: string) {
-  const needle = query.trim().toLowerCase();
-  if (!needle) return true;
-  return (
-    stub.agentId.toLowerCase().includes(needle) ||
-    stub.owner.toLowerCase().includes(needle) ||
-    (stub.agentURI || "").toLowerCase().includes(needle)
-  );
+  return registeredIndexPromise;
 }
 
 function matchesAgentQuery(agent: AgentWithDetails, query: string) {
@@ -228,55 +215,111 @@ async function hydrateAgentSlice(stubs: SepoliaRegistryStub[]) {
       {
         address: registryAddress,
         abi: IDENTITY_REGISTRY_ABI,
-        functionName: "ownerOf",
-        args: [BigInt(stub.agentId)],
+        functionName: "ownerOf" as const,
+        args: [BigInt(stub.agentId)] as const,
       },
       {
         address: registryAddress,
         abi: IDENTITY_REGISTRY_ABI,
-        functionName: "tokenURI",
-        args: [BigInt(stub.agentId)],
+        functionName: "tokenURI" as const,
+        args: [BigInt(stub.agentId)] as const,
       },
     ]),
   });
 
-  const timestamps = await Promise.all(
-    stubs.map((stub) => getBlockTimestamp(client, stub.blockNumber))
-  );
-
-  return Promise.all(
-    stubs.map(async (stub, index) => {
+  const agents = await Promise.all(
+    stubs.map(async (stub, index): Promise<AgentWithDetails | null> => {
       const ownerResult = multicallResults[index * 2];
       const uriResult = multicallResults[index * 2 + 1];
+      if (ownerResult?.status !== "success" || typeof ownerResult.result !== "string") return null;
 
-      const owner =
-        ownerResult?.status === "success" && ownerResult.result
-          ? ownerResult.result
-          : stub.owner;
       const agentURI =
         uriResult?.status === "success" && typeof uriResult.result === "string"
-          ? normalizeOptionalString(uriResult.result) || stub.agentURI
-          : stub.agentURI;
+          ? normalizeOptionalString(uriResult.result)
+          : null;
       const registrationFile = await getCachedRegistrationFile(agentURI);
-      const timestamp = timestamps[index] || 0;
 
       return {
         id: stub.agentId,
         agentId: stub.agentId,
         chainId: String(AGENT_NETWORK_CHAIN_IDS.sepolia),
-        owner,
+        owner: ownerResult.result,
         operators: [],
         agentURI,
-        createdAt: String(timestamp),
-        updatedAt: String(timestamp),
+        createdAt: "0",
+        updatedAt: "0",
         totalFeedback: "0",
-        lastActivity: String(timestamp),
+        lastActivity: "0",
         registrationFile,
         feedback: [],
         stats: null,
-      } satisfies AgentWithDetails;
+      };
     })
   );
+
+  return agents.filter((agent): agent is AgentWithDetails => Boolean(agent));
+}
+
+async function fetchOwnerIndex() {
+  const stubs = await getRegisteredIndex();
+  const client = getSepoliaClient();
+  const registryAddress = getSepoliaRegistryAddress();
+  const result = new Map<string, SepoliaRegistryStub[]>();
+  if (!client || !registryAddress || !stubs.length) return result;
+
+  const batches: SepoliaRegistryStub[][] = [];
+  for (let index = 0; index < stubs.length; index += OWNER_BATCH_SIZE) {
+    batches.push(stubs.slice(index, index + OWNER_BATCH_SIZE));
+  }
+
+  for (let index = 0; index < batches.length; index += OWNER_BATCH_CONCURRENCY) {
+    const groups = await Promise.all(
+      batches.slice(index, index + OWNER_BATCH_CONCURRENCY).map(async (batch) => {
+        const owners = await client.multicall({
+          allowFailure: true,
+          contracts: batch.map((stub) => ({
+            address: registryAddress,
+            abi: IDENTITY_REGISTRY_ABI,
+            functionName: "ownerOf" as const,
+            args: [BigInt(stub.agentId)] as const,
+          })),
+        });
+        return { batch, owners };
+      })
+    );
+
+    for (const { batch, owners } of groups) {
+      owners.forEach((ownerResult, ownerIndex) => {
+        if (ownerResult.status !== "success" || typeof ownerResult.result !== "string") return;
+        const key = ownerResult.result.toLowerCase();
+        const current = result.get(key) || [];
+        current.push(batch[ownerIndex]);
+        result.set(key, current);
+      });
+    }
+  }
+
+  return result;
+}
+
+async function getOwnerIndex() {
+  const now = Date.now();
+  if (ownerIndexCache && ownerIndexCache.expiresAt > now) return ownerIndexCache.items;
+  if (ownerIndexPromise) return ownerIndexPromise;
+
+  ownerIndexPromise = fetchOwnerIndex()
+    .then((items) => {
+      ownerIndexCache = {
+        expiresAt: Date.now() + OWNER_INDEX_CACHE_TTL_MS,
+        items,
+      };
+      return items;
+    })
+    .finally(() => {
+      ownerIndexPromise = null;
+    });
+
+  return ownerIndexPromise;
 }
 
 async function collectMatchingAgents(params: {
@@ -289,8 +332,6 @@ async function collectMatchingAgents(params: {
 }) {
   const { query, protocol, first, skip, orderBy, orderDirection } = params;
   const normalizedQuery = query?.trim().toLowerCase() || "";
-  const structuredQuery = normalizedQuery ? isStructuredQuery(normalizedQuery) : false;
-
   const sorted = [...(await getRegisteredIndex())].sort((a, b) =>
     compareStubs(a, b, orderBy, orderDirection)
   );
@@ -299,23 +340,21 @@ async function collectMatchingAgents(params: {
     return hydrateAgentSlice(sorted.slice(skip, skip + first));
   }
 
-  const candidates = structuredQuery
-    ? sorted.filter((stub) => matchesStubQuery(stub, normalizedQuery))
-    : sorted.slice(0, SEARCH_SCAN_LIMIT);
-
-  const matches: AgentWithDetails[] = [];
-  const batchSize = Math.max(first * 3, 24);
-
-  for (let cursor = 0; cursor < candidates.length && matches.length < skip + first; cursor += batchSize) {
-    const hydrated = await hydrateAgentSlice(candidates.slice(cursor, cursor + batchSize));
-    for (const agent of hydrated) {
-      if (!matchesProtocol(agent, protocol)) continue;
-      if (!matchesAgentQuery(agent, normalizedQuery)) continue;
-      matches.push(agent);
-      if (matches.length >= skip + first) break;
-    }
+  let candidates: SepoliaRegistryStub[];
+  if (/^0x[a-f0-9]{40}$/.test(normalizedQuery)) {
+    candidates = [...((await getOwnerIndex()).get(normalizedQuery) || [])].sort((a, b) =>
+      compareStubs(a, b, orderBy, orderDirection)
+    );
+  } else if (/^\d+$/.test(normalizedQuery)) {
+    candidates = sorted.filter((stub) => stub.agentId.includes(normalizedQuery));
+  } else {
+    candidates = sorted.slice(0, SEARCH_SCAN_LIMIT);
   }
 
+  const hydrated = await hydrateAgentSlice(candidates);
+  const matches = hydrated
+    .filter((agent) => matchesProtocol(agent, protocol))
+    .filter((agent) => matchesAgentQuery(agent, normalizedQuery));
   return matches.slice(skip, skip + first);
 }
 
@@ -353,6 +392,21 @@ export async function searchSepoliaIdentityRegistryFallbackAgents(params: {
   });
 }
 
+export async function listSepoliaIdentityRegistryFallbackAgentsByOwner(
+  owner: string,
+  params?: { first?: number; skip?: number }
+) {
+  const normalizedOwner = owner.trim().toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/.test(normalizedOwner)) return [] as AgentWithDetails[];
+
+  const stubs = [...((await getOwnerIndex()).get(normalizedOwner) || [])].sort((a, b) =>
+    compareStubs(a, b, "createdAt", "desc")
+  );
+  const skip = params?.skip ?? 0;
+  const first = params?.first ?? 50;
+  return hydrateAgentSlice(stubs.slice(skip, skip + first));
+}
+
 export async function getSepoliaIdentityRegistryFallbackAgentByAgentId(
   agentIdLike: string,
   options?: { skipChainRefresh?: boolean }
@@ -360,10 +414,11 @@ export async function getSepoliaIdentityRegistryFallbackAgentByAgentId(
   const agentId = agentIdLike.trim();
   if (!/^\d+$/.test(agentId)) return null;
 
-  const stub = (await getRegisteredIndex()).find((item) => item.agentId === agentId);
-  if (!stub) return null;
+  const numericAgentId = Number(agentId);
+  const items = await getRegisteredIndex();
+  if (!Number.isSafeInteger(numericAgentId) || numericAgentId < 0 || numericAgentId >= items.length) return null;
 
-  const [agent] = await hydrateAgentSlice([stub]);
+  const [agent] = await hydrateAgentSlice([{ agentId, sequence: BigInt(agentId) }]);
   if (!agent) return null;
   if (options?.skipChainRefresh) return agent;
 

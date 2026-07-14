@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useState, useEffect, useMemo, useCallback, Suspense } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
     Search,
@@ -16,11 +16,10 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { AgentCard } from "@/components/agents/agent-card";
+import { AgentImage } from "@/components/agents/agent-image";
 import type { Agent } from "@/types/agent";
 import { truncateAddress, getDisplayName, formatDate } from "@/lib/format";
 import { getAddressExplorerUrl, getAddressExplorerUrlForNetwork, getAgentNetworkFromChainId } from "@/lib/block-explorer";
-import { useRealityQuestions } from "@/lib/reality/use-questions";
-import { parseAgentIdFromQuestionText } from "@/lib/reality/abuse-flags";
 import {
     AGENT_SUBGRAPH_NETWORKS,
     getAgentChainLabel,
@@ -28,29 +27,9 @@ import {
     isAgentSubgraphNetwork,
     type AgentSubgraphNetwork,
 } from "@/lib/agent-networks";
+import { useVerificationEnvironment } from "@/components/verification-environment-provider";
 
 type AgentRegistryNetwork = AgentSubgraphNetwork | "all";
-
-type AgentTrustSignals = {
-    collateralized: boolean;
-};
-
-function getAgentIdVariants(value: string): Set<string> {
-    const normalized = value.trim().toLowerCase();
-    const short = normalized.split(":").pop() || normalized;
-    return new Set([normalized, short]);
-}
-
-function matchesReportedAgent(questionText: string, agentId: string) {
-    const parsedAgentId = parseAgentIdFromQuestionText(questionText);
-    if (!parsedAgentId) return false;
-    const variants = getAgentIdVariants(agentId);
-    const parsedVariants = getAgentIdVariants(parsedAgentId);
-    for (const parsed of parsedVariants) {
-        if (variants.has(parsed)) return true;
-    }
-    return false;
-}
 
 export default function AgentsPage() {
     return (
@@ -71,135 +50,102 @@ function AgentsLoading() {
 }
 
 function AgentsContent() {
+    const { environment, withEnvironment } = useVerificationEnvironment();
     const router = useRouter();
-    const realityQuestions = useRealityQuestions();
     const searchParams = useSearchParams();
     const initialQuery = searchParams.get("q") || "";
     const initialNetworkParam = searchParams.get("network");
     const initialNetwork: AgentRegistryNetwork = isAgentSubgraphNetwork(initialNetworkParam)
         ? initialNetworkParam
         : "all";
+    const requestedSort = searchParams.get("sort") || "";
+    const initialSort = ["createdAt:desc", "updatedAt:desc", "lastActivity:desc", "totalFeedback:desc"].includes(requestedSort)
+        ? requestedSort
+        : "createdAt:desc";
+    const initialProtocol = ["all", "mcp", "a2a"].includes(searchParams.get("protocol") || "")
+        ? searchParams.get("protocol") || "all"
+        : "all";
+    const initialCollateral = ["all", "collateralized", "notCollateralized"].includes(
+        searchParams.get("collateral") || ""
+    )
+        ? (searchParams.get("collateral") as "all" | "collateralized" | "notCollateralized")
+        : "all";
 
     const [agents, setAgents] = useState<Agent[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState(initialQuery);
+    const [appliedQuery, setAppliedQuery] = useState(initialQuery);
     const [network, setNetwork] = useState<AgentRegistryNetwork>(initialNetwork);
-    const [sortBy, setSortBy] = useState("createdAt:desc");
-    const [protocolFilter, setProtocolFilter] = useState("all");
+    const [sortBy, setSortBy] = useState(initialSort);
+    const [protocolFilter, setProtocolFilter] = useState(initialProtocol);
     const [currentPage, setCurrentPage] = useState(1);
     const [hasMore, setHasMore] = useState(false);
     const [perPage, setPerPage] = useState("12");
     const [viewMode, setViewMode] = useState<"list" | "card">("list");
-    const [collateralFilter, setCollateralFilter] = useState<"all" | "collateralized" | "notCollateralized">("all");
-    const [reportFilter, setReportFilter] = useState<"all" | "reported" | "nonReported">("all");
-    const [trustByKey, setTrustByKey] = useState<Record<string, AgentTrustSignals>>({});
-    const [trustLoading, setTrustLoading] = useState(false);
+    const [collateralFilter, setCollateralFilter] = useState<"all" | "collateralized" | "notCollateralized">(initialCollateral);
 
     const resolveAgentNetwork = useCallback(
         (agent: Agent): AgentSubgraphNetwork => getAgentNetworkFromChainId(agent.chainId) || (network === "all" ? "sepolia" : network),
         [network]
     );
 
-    const fetchAgents = useCallback(async (page: number = 1, query?: string) => {
+    const fetchAgents = useCallback(async (page: number = 1, query = "", signal?: AbortSignal) => {
         setIsLoading(true);
-        const searchTerm = query !== undefined ? query : searchQuery;
-        const isReportWideFetch = reportFilter !== "all";
-        const requestedPage = isReportWideFetch ? 1 : page;
-        const requestedPageSize = isReportWideFetch ? "300" : perPage;
         try {
             const params = new URLSearchParams({
-                page: requestedPage.toString(),
-                pageSize: requestedPageSize,
+                page: page.toString(),
+                pageSize: perPage,
                 sort: sortBy,
             });
             params.set("network", network);
-            if (searchTerm) params.set("q", searchTerm);
+            params.set("verificationEnvironment", environment);
+            if (query) params.set("q", query);
             if (protocolFilter !== "all") params.set("protocol", protocolFilter);
             if (collateralFilter !== "all") params.set("collateralFilter", collateralFilter);
 
-            const response = await fetch(`/api/agents?${params}`);
+            const response = await fetch(`/api/agents?${params}`, { signal });
             const data = await response.json();
 
             if (data.success) {
                 setAgents(data.items);
-                setHasMore(isReportWideFetch ? false : data.hasMore);
-                setCurrentPage(requestedPage);
+                setHasMore(Boolean(data.hasMore));
+                setCurrentPage(page);
             }
         } catch (error) {
+            if (signal?.aborted) return;
             console.error("Failed to fetch agents:", error);
         } finally {
-            setIsLoading(false);
+            if (!signal?.aborted) setIsLoading(false);
         }
-    }, [searchQuery, perPage, sortBy, protocolFilter, network, reportFilter, collateralFilter]);
+    }, [perPage, sortBy, protocolFilter, network, collateralFilter, environment]);
 
     useEffect(() => {
-        fetchAgents(1, searchQuery);
-    }, [fetchAgents, searchQuery]);
-
-    useEffect(() => {
-        let cancelled = false;
-        async function hydrateTrustSignals() {
-            if (!agents.length) {
-                setTrustByKey({});
-                return;
-            }
-
-            setTrustLoading(true);
-            try {
-                const updates = await Promise.all(
-                    agents.map(async (agent) => {
-                        const agentNetwork = resolveAgentNetwork(agent);
-                        const key = `${agentNetwork}:${agent.agentId.toLowerCase()}`;
-
-                        try {
-                            const res = await fetch(
-                                `/api/kleros/verification?agentId=${encodeURIComponent(agent.agentId)}&network=${encodeURIComponent(agentNetwork)}`,
-                                { cache: "no-store" }
-                            );
-                            const json = await res.json();
-                            const collateralized = Boolean(json?.success && json?.itemID);
-                            return [key, { collateralized }] as const;
-                        } catch {
-                            return [key, { collateralized: false }] as const;
-                        }
-                    })
-                );
-
-                if (cancelled) return;
-                const next: Record<string, AgentTrustSignals> = {};
-                for (const [key, value] of updates) next[key] = value;
-                setTrustByKey(next);
-            } finally {
-                if (!cancelled) setTrustLoading(false);
-            }
-        }
-
-        void hydrateTrustSignals();
+        const controller = new AbortController();
+        void fetchAgents(1, appliedQuery, controller.signal);
         return () => {
-            cancelled = true;
+            controller.abort();
         };
-    }, [agents, resolveAgentNetwork]);
+    }, [appliedQuery, fetchAgents]);
 
-    const reportedByKey = useMemo(() => {
-        const next: Record<string, boolean> = {};
-        for (const agent of agents) {
-            const key = `${resolveAgentNetwork(agent)}:${agent.agentId.toLowerCase()}`;
-            next[key] = realityQuestions.data.some((q) => matchesReportedAgent(q.question, String(agent.agentId)));
-        }
-        return next;
-    }, [agents, resolveAgentNetwork, realityQuestions.data]);
+    useEffect(() => {
+        const params = new URLSearchParams(searchParams.toString());
+        params.set("network", network);
+        params.set("verificationEnvironment", environment);
+        if (appliedQuery) params.set("q", appliedQuery);
+        else params.delete("q");
+        if (protocolFilter !== "all") params.set("protocol", protocolFilter);
+        else params.delete("protocol");
+        if (collateralFilter !== "all") params.set("collateral", collateralFilter);
+        else params.delete("collateral");
+        if (sortBy !== "createdAt:desc") params.set("sort", sortBy);
+        else params.delete("sort");
 
-    const filteredAgents = agents.filter((agent) => {
-        const key = `${resolveAgentNetwork(agent)}:${agent.agentId.toLowerCase()}`;
-        const reported = reportedByKey[key] || false;
+        const next = params.toString();
+        if (next !== searchParams.toString()) router.replace(`/agents?${next}`, { scroll: false });
+    }, [appliedQuery, collateralFilter, environment, network, protocolFilter, router, searchParams, sortBy]);
 
-        if (reportFilter === "reported" && !reported) return false;
-        if (reportFilter === "nonReported" && reported) return false;
-
-        return true;
-    });
-
-    const handleSearch = () => fetchAgents(1, searchQuery);
+    const filteredAgents = agents;
+    const handleSearch = () => setAppliedQuery(searchQuery.trim());
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === "Enter") handleSearch();
     };
@@ -217,20 +163,26 @@ function AgentsContent() {
             </div>
 
             <div className="rounded-xl border border-border/50 bg-card/50 backdrop-blur-sm p-4 mb-6">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
-                    <div className="relative flex-1">
-                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                        <input
-                            type="text"
-                            placeholder="Search by name or agent ID..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            onKeyDown={handleKeyDown}
-                            className="h-11 w-full rounded-lg border border-border/50 bg-background pl-10 pr-4 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
-                        />
+                <div className="flex flex-col gap-4">
+                    <div className="flex gap-2">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                            <input
+                                type="text"
+                                placeholder="Search by agent number"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                onKeyDown={handleKeyDown}
+                                className="h-11 w-full rounded-lg border border-border/50 bg-background pl-10 pr-4 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                            />
+                        </div>
+                        <Button type="button" className="h-11" onClick={handleSearch}>
+                            <Search className="mr-2 h-4 w-4" />
+                            Search
+                        </Button>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                         <Select value={sortBy} onValueChange={setSortBy}>
                             <SelectTrigger className="w-[160px] h-11">
                                 <SelectValue placeholder="Sort by" />
@@ -291,20 +243,6 @@ function AgentsContent() {
                             </SelectContent>
                         </Select>
 
-                        <Select
-                            value={reportFilter}
-                            onValueChange={(value: "all" | "reported" | "nonReported") => setReportFilter(value)}
-                        >
-                            <SelectTrigger className="w-[170px] h-11">
-                                <SelectValue placeholder="Reports" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">All reports</SelectItem>
-                                <SelectItem value="reported">Reported</SelectItem>
-                                <SelectItem value="nonReported">Non reported</SelectItem>
-                            </SelectContent>
-                        </Select>
-
                         <div className="inline-flex items-center rounded-lg border border-border/50 bg-background/50 p-1">
                             <Button
                                 type="button"
@@ -337,6 +275,7 @@ function AgentsContent() {
                         <TableHeader>
                                 <TableRow className="hover:bg-transparent border-border/50">
                                     <TableHead className="w-[300px] font-semibold">Name</TableHead>
+                                    <TableHead className="font-semibold">Agent ID</TableHead>
                                     <TableHead className="text-center font-semibold">Collateralized</TableHead>
                                     <TableHead className="font-semibold">Chain</TableHead>
                                     <TableHead className="font-semibold">Owner</TableHead>
@@ -346,13 +285,13 @@ function AgentsContent() {
                         <TableBody>
                             {isLoading ? (
                                 <TableRow>
-                                    <TableCell colSpan={5} className="h-32 text-center">
+                                    <TableCell colSpan={6} className="h-32 text-center">
                                         <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
                                     </TableCell>
                                 </TableRow>
                             ) : filteredAgents.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
+                                    <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
                                         No agents found
                                     </TableCell>
                                 </TableRow>
@@ -362,8 +301,7 @@ function AgentsContent() {
                                     const ownerExplorerUrl =
                                         getAddressExplorerUrl(agent.owner, agent.chainId) ||
                                         getAddressExplorerUrlForNetwork(agent.owner, agentNetwork);
-                                    const trust = trustByKey[`${agentNetwork}:${agent.agentId.toLowerCase()}`];
-                                    const agentHref = `/agents/${encodeURIComponent(agent.id)}?network=${agentNetwork}`;
+                                    const agentHref = withEnvironment(`/agents/${encodeURIComponent(agent.id)}?network=${agentNetwork}`);
 
                                     return (
                                         <TableRow
@@ -382,16 +320,12 @@ function AgentsContent() {
                                             <TableCell>
                                                 <div className="flex items-center gap-3">
                                                     <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted overflow-hidden shrink-0">
-                                                        {agent.registrationFile?.image ? (
-                                                            // eslint-disable-next-line @next/next/no-img-element
-                                                            <img
-                                                                src={agent.registrationFile.image}
-                                                                alt={getDisplayName(agent)}
-                                                                className="h-9 w-9 object-cover"
-                                                            />
-                                                        ) : (
-                                                            <span className="text-sm">AI</span>
-                                                        )}
+                                                        <AgentImage
+                                                            src={agent.registrationFile?.image}
+                                                            alt={getDisplayName(agent)}
+                                                            className="h-9 w-9 object-cover"
+                                                            fallbackClassName="text-sm"
+                                                        />
                                                     </div>
                                                     <div className="min-w-0">
                                                         <span className="font-medium truncate block max-w-[200px]">
@@ -405,10 +339,11 @@ function AgentsContent() {
                                                     </div>
                                                 </div>
                                             </TableCell>
+                                            <TableCell>
+                                                <span className="font-mono text-sm text-foreground">{agent.agentId}</span>
+                                            </TableCell>
                                             <TableCell className="text-center">
-                                                {trustLoading && !trust ? (
-                                                    <span className="text-muted-foreground">...</span>
-                                                ) : trust?.collateralized ? (
+                                                {agent.collateralized ? (
                                                     <Badge className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">Yes</Badge>
                                                 ) : (
                                                     <Badge variant="outline" className="text-muted-foreground">No</Badge>
@@ -441,7 +376,7 @@ function AgentsContent() {
                                             </TableCell>
                                             <TableCell>
                                                 <span className="text-sm text-muted-foreground">
-                                                    {formatDate(agent.createdAt)}
+                                                    {Number(agent.createdAt) > 0 ? formatDate(agent.createdAt) : "-"}
                                                 </span>
                                             </TableCell>
                                         </TableRow>
@@ -491,8 +426,8 @@ function AgentsContent() {
                     <Button
                         variant="outline"
                         size="sm"
-                        disabled={currentPage === 1 || reportFilter !== "all"}
-                        onClick={() => fetchAgents(currentPage - 1)}
+                        disabled={currentPage === 1 || isLoading}
+                        onClick={() => fetchAgents(currentPage - 1, appliedQuery)}
                         className="rounded-lg"
                     >
                         <ChevronLeft className="h-4 w-4 mr-1" />
@@ -502,8 +437,8 @@ function AgentsContent() {
                     <Button
                         variant="outline"
                         size="sm"
-                        disabled={!hasMore || reportFilter !== "all"}
-                        onClick={() => fetchAgents(currentPage + 1)}
+                        disabled={!hasMore || isLoading}
+                        onClick={() => fetchAgents(currentPage + 1, appliedQuery)}
                         className="rounded-lg"
                     >
                         Next

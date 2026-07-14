@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isCurateItemAccepted, lookupCurateItemByAgentId } from "@/lib/kleros-curate";
 import { isAgentSubgraphNetwork, type AgentSubgraphNetwork } from "@/lib/agent-networks";
+import { getVerificationEnvironmentFromSearchParams } from "@/lib/verification-environment";
 
 export async function GET(request: NextRequest) {
     const agentId = request.nextUrl.searchParams.get("agentId");
     const rawNetwork = request.nextUrl.searchParams.get("network");
+    const verificationEnvironment = getVerificationEnvironmentFromSearchParams(request.nextUrl.searchParams);
 
     if (!agentId) {
         return NextResponse.json({ success: false, error: "Missing agentId" }, { status: 400 });
@@ -21,6 +23,7 @@ export async function GET(request: NextRequest) {
     try {
         const lookup = await lookupCurateItemByAgentId(agentId, {
             network,
+            verificationEnvironment,
         });
 
         const nowSec = Math.floor(Date.now() / 1000);
@@ -35,6 +38,9 @@ export async function GET(request: NextRequest) {
             itemID: lookup.itemID ?? null,
             disputed: lookup.disputed ?? null,
             network: network ?? null,
+            verificationEnvironment,
+            chainId: lookup.chainId,
+            registryAddress: lookup.registryAddress,
             curateRegistryUrl: lookup.curateRegistryUrl,
             curateItemUrl: lookup.curateItemUrl ?? null,
         });

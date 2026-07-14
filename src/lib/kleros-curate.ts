@@ -2,22 +2,24 @@ import { GraphQLClient, gql } from "graphql-request";
 import type { AgentSubgraphNetwork } from "@/lib/agent-networks";
 import { getAgentNetworkFromChainId, parseChainId } from "@/lib/block-explorer";
 import {
-  getCurateMode,
-  getCurateRegistryAddress,
-  getCurateSubgraphUrl,
   getGoldskyApiKey,
+  getPgtcrDeployment,
   type CurateMode,
 } from "@/lib/curate-config";
+import {
+  DEFAULT_VERIFICATION_ENVIRONMENT,
+  type VerificationEnvironment,
+} from "@/lib/verification-environment";
 
 export const KLEROS_CURATE_SEPOLIA_CHAIN_ID = 11155111;
 
-function getCurateRegistryUrl(registryAddress: string) {
+function getCurateRegistryUrl(registryAddress: string, chainId: number) {
   // Kleros Curate UI expects checksummed address in the URL (but any-case works in practice).
-  return `https://curate.kleros.io/tcr/${KLEROS_CURATE_SEPOLIA_CHAIN_ID}/${registryAddress}`;
+  return `https://curate.kleros.io/tcr/${chainId}/${registryAddress}`;
 }
 
-function getCurateItemUrl(registryAddress: string, itemID: string) {
-  return `${getCurateRegistryUrl(registryAddress)}/${encodeURIComponent(itemID)}`;
+function getCurateItemUrl(registryAddress: string, itemID: string, chainId: number) {
+  return `${getCurateRegistryUrl(registryAddress, chainId)}/${encodeURIComponent(itemID)}`;
 }
 
 export type GtcrItemStatus =
@@ -34,6 +36,9 @@ export type CurateItemStatus = GtcrItemStatus | PgtcrItemStatus;
 export interface CurateLookupResult {
   found: boolean;
   mode: CurateMode;
+  verificationEnvironment: VerificationEnvironment;
+  chainId: number;
+  registryAddress: string;
   status?: CurateItemStatus;
   itemID?: string;
   disputed?: boolean;
@@ -47,42 +52,18 @@ export interface CurateLookupResult {
   curateItemUrl?: string;
 }
 
-// -----------------
-// GTCR (Envio) query
-// -----------------
-
-const GTCR_LITEMS_BY_REGISTRY_AND_KEY0 = gql`
-  query LItemsByRegistryAndKey0($registry: String!, $key0: String!) {
-    LItem(
-      where: { registryAddress: { _eq: $registry }, key0: { _eq: $key0 } }
-      order_by: { latestRequestSubmissionTime: desc }
-    ) {
-      id
-      itemID
-      status
-      disputed
-      latestRequestSubmissionTime
-      latestRequestResolutionTime
-      key0
-      props {
-        label
-        value
-        isIdentifier
-      }
-    }
-  }
-`;
-
 // -------------------
 // PGTCR (Goldsky) query
 // -------------------
 
 const PGTCR_ITEMS_BY_REGISTRY_AND_KEY0 = gql`
-  query ItemsByRegistryAndKey0($registry: Bytes!, $key0: String!) {
+  query ItemsByRegistryAndKey0($registry: Bytes!, $key0: String!, $first: Int!, $skip: Int!) {
     items(
       where: { registryAddress: $registry, metadata_: { key0: $key0 } }
       orderBy: includedAt
       orderDirection: desc
+      first: $first
+      skip: $skip
     ) {
       id
       itemID
@@ -101,43 +82,19 @@ const PGTCR_ITEMS_BY_REGISTRY_AND_KEY0 = gql`
   }
 `;
 
-type CurateProp = {
-  label?: string | null;
-  value?: string | null;
-  isIdentifier?: boolean | null;
-};
-
 function getNetworkFromCaip10Owner(value: string | null | undefined): AgentSubgraphNetwork | null {
   const chainId = parseChainId(value || "");
   if (!chainId) return null;
   return getAgentNetworkFromChainId(chainId);
 }
 
-function getNetworkFromGtcrProps(props: CurateProp[] | null | undefined): AgentSubgraphNetwork | null {
-  if (!props?.length) return null;
-  const key2 = props.find((prop) => prop.label?.trim().toLowerCase() === "key2")?.value?.trim();
-  if (!key2) return null;
-  return getNetworkFromCaip10Owner(key2);
-}
-
-function matchesExpectedNetwork(
-  expectedNetwork: AgentSubgraphNetwork | undefined,
-  resolvedNetwork: AgentSubgraphNetwork | null
-): boolean {
-  if (!expectedNetwork) return true;
-  return resolvedNetwork === expectedNetwork;
-}
-
-function makeGraphqlClient(mode: CurateMode): GraphQLClient {
-  const url = getCurateSubgraphUrl(mode);
-
-  // Goldsky public endpoints often accept an API key header.
-  if (mode === "pgtcr") {
-    const apiKey = getGoldskyApiKey();
-    return new GraphQLClient(url, apiKey ? { headers: { "x-api-key": apiKey } } : undefined);
-  }
-
-  return new GraphQLClient(url);
+function makeGraphqlClient(verificationEnvironment: VerificationEnvironment): GraphQLClient {
+  const deployment = getPgtcrDeployment(verificationEnvironment);
+  const apiKey = getGoldskyApiKey(verificationEnvironment);
+  return new GraphQLClient(
+    deployment.subgraphUrl,
+    apiKey ? { headers: { "x-api-key": apiKey } } : undefined
+  );
 }
 
 export function isCurateItemAccepted(lookup: CurateLookupResult, nowSec: number): boolean {
@@ -169,50 +126,65 @@ export function isCurateItemAccepted(lookup: CurateLookupResult, nowSec: number)
   return false;
 }
 
+export function selectPreferredCurateLookup(
+  items: readonly CurateLookupResult[]
+): CurateLookupResult | undefined {
+  return items.find((item) => item.status !== "Absent") || items[0];
+}
+
 export async function lookupCurateItemByAgentId(
   agentId: string | number,
-  options?: { network?: AgentSubgraphNetwork }
+  options?: {
+    network?: AgentSubgraphNetwork;
+    verificationEnvironment?: VerificationEnvironment;
+  }
 ): Promise<CurateLookupResult> {
+  const verificationEnvironment = options?.verificationEnvironment || DEFAULT_VERIFICATION_ENVIRONMENT;
+  const deployment = getPgtcrDeployment(verificationEnvironment);
+  const matches = await lookupCurateItemsByAgentId(agentId, options);
+  const selected = selectPreferredCurateLookup(matches);
+  if (selected) return selected;
+
+  return {
+    found: false,
+    mode: "pgtcr",
+    verificationEnvironment,
+    chainId: deployment.chainId,
+    registryAddress: deployment.registryAddress,
+    curateRegistryUrl: getCurateRegistryUrl(deployment.registryAddress, deployment.chainId),
+  };
+}
+
+/** Returns every source-chain-matching lifecycle, newest first. */
+export async function lookupCurateItemsByAgentId(
+  agentId: string | number,
+  options?: {
+    network?: AgentSubgraphNetwork;
+    verificationEnvironment?: VerificationEnvironment;
+  }
+): Promise<CurateLookupResult[]> {
   const key0 = String(agentId);
   const expectedNetwork = options?.network;
-  const mode = getCurateMode();
-  const registryAddress = getCurateRegistryAddress(mode);
+  const verificationEnvironment = options?.verificationEnvironment || DEFAULT_VERIFICATION_ENVIRONMENT;
+  const mode: CurateMode = "pgtcr";
+  const deployment = getPgtcrDeployment(verificationEnvironment);
+  const registryAddress = deployment.registryAddress;
 
-  const client = makeGraphqlClient(mode);
+  const client = makeGraphqlClient(verificationEnvironment);
 
-  const curateRegistryUrl = getCurateRegistryUrl(registryAddress);
+  const curateRegistryUrl = getCurateRegistryUrl(registryAddress, deployment.chainId);
 
-  if (mode === "gtcr") {
+  type LookupItem = {
+    itemID: string;
+    status: PgtcrItemStatus;
+    includedAt: string;
+    metadata?: { key0?: string; key2?: string | null } | null;
+    registry: { submissionPeriod: string; reinclusionPeriod: string };
+  };
+  const indexedItems: LookupItem[] = [];
+  const pageSize = 100;
+  for (let skip = 0; ; skip += pageSize) {
     const res = await client.request<{
-      LItem: Array<{
-        itemID: string;
-        status: GtcrItemStatus;
-        disputed?: boolean;
-        props?: CurateProp[];
-      }>;
-    }>(GTCR_LITEMS_BY_REGISTRY_AND_KEY0, {
-      registry: registryAddress.toLowerCase(),
-      key0,
-    });
-
-    const first = (res?.LItem || []).find((item) =>
-      matchesExpectedNetwork(expectedNetwork, getNetworkFromGtcrProps(item.props))
-    );
-    if (!first) return { found: false, mode, curateRegistryUrl };
-
-    return {
-      found: true,
-      mode,
-      status: first.status,
-      itemID: first.itemID,
-      disputed: first.disputed,
-      curateRegistryUrl,
-      curateItemUrl: getCurateItemUrl(registryAddress, first.itemID),
-    };
-  }
-
-  // mode === "pgtcr"
-  const res = await client.request<{
     items: Array<{
       itemID: string;
       status: PgtcrItemStatus;
@@ -220,35 +192,44 @@ export async function lookupCurateItemByAgentId(
       metadata?: { key0?: string; key2?: string | null } | null;
       registry: { submissionPeriod: string; reinclusionPeriod: string };
     }>;
-  }>(PGTCR_ITEMS_BY_REGISTRY_AND_KEY0, {
-    registry: registryAddress.toLowerCase(),
-    key0,
-  });
+    }>(PGTCR_ITEMS_BY_REGISTRY_AND_KEY0, {
+      registry: registryAddress.toLowerCase(),
+      key0,
+      first: pageSize,
+      skip,
+    });
+    const page = res?.items || [];
+    indexedItems.push(...page);
+    if (page.length < pageSize) break;
+  }
 
   const fallbackFromAgentId = getNetworkFromCaip10Owner(key0);
-  const first = (res?.items || []).find((item) => {
+  const matches = indexedItems.filter((item) => {
     if (!expectedNetwork) return true;
     const metadataNetwork = getNetworkFromCaip10Owner(item.metadata?.key2 || "");
     if (metadataNetwork) return metadataNetwork === expectedNetwork;
     if (fallbackFromAgentId) return fallbackFromAgentId === expectedNetwork;
     return false;
   });
-  if (!first) return { found: false, mode, curateRegistryUrl };
 
-  const includedAt = Number(first.includedAt);
-  const submissionPeriod = Number(first.registry?.submissionPeriod);
-  const reinclusionPeriod = Number(first.registry?.reinclusionPeriod);
-
-  return {
-    found: true,
-    mode,
-    status: first.status,
-    itemID: first.itemID,
-    disputed: first.status === "Disputed",
-    includedAt: Number.isFinite(includedAt) ? includedAt : undefined,
-    submissionPeriod: Number.isFinite(submissionPeriod) ? submissionPeriod : undefined,
-    reinclusionPeriod: Number.isFinite(reinclusionPeriod) ? reinclusionPeriod : undefined,
-    curateRegistryUrl,
-    curateItemUrl: getCurateItemUrl(registryAddress, first.itemID),
-  };
+  return matches.map((item) => {
+    const includedAt = Number(item.includedAt);
+    const submissionPeriod = Number(item.registry?.submissionPeriod);
+    const reinclusionPeriod = Number(item.registry?.reinclusionPeriod);
+    return {
+      found: true,
+      mode,
+      verificationEnvironment,
+      chainId: deployment.chainId,
+      registryAddress,
+      status: item.status,
+      itemID: item.itemID,
+      disputed: item.status === "Disputed",
+      includedAt: Number.isFinite(includedAt) ? includedAt : undefined,
+      submissionPeriod: Number.isFinite(submissionPeriod) ? submissionPeriod : undefined,
+      reinclusionPeriod: Number.isFinite(reinclusionPeriod) ? reinclusionPeriod : undefined,
+      curateRegistryUrl,
+      curateItemUrl: getCurateItemUrl(registryAddress, item.itemID, deployment.chainId),
+    } satisfies CurateLookupResult;
+  });
 }

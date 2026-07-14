@@ -12,9 +12,9 @@ import {
 import type { Agent, AgentWithDetails } from "@/types/agent";
 import { getDisplayName, truncateAddress } from "@/lib/format";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useRealityQuestions } from "@/lib/reality/use-questions";
-import { doesQuestionMatchAgent } from "@/lib/reality/question-match";
 import { getAddressExplorerUrlForNetwork } from "@/lib/block-explorer";
+import { useVerificationEnvironment } from "@/components/verification-environment-provider";
+import type { VerificationEnvironment } from "@/lib/verification-environment";
 
 type ComparePick = {
   id: string;
@@ -74,7 +74,11 @@ function compactList(values: string[] | null | undefined, max = 3): string {
   return `${items.slice(0, max).join(", ")} (+${items.length - max})`;
 }
 
-async function searchAcrossNetworks(query: string, mode: SearchMode = "auto") {
+async function searchAcrossNetworks(
+  query: string,
+  mode: SearchMode = "auto",
+  verificationEnvironment: VerificationEnvironment = "testnet"
+) {
   const trimmed = query.trim();
   if (!trimmed) return [] as ComparePick[];
   const effectiveMode = resolveSearchMode(mode, trimmed);
@@ -95,7 +99,7 @@ async function searchAcrossNetworks(query: string, mode: SearchMode = "auto") {
 
       if (effectiveMode === "owner") {
         const res = await fetch(
-          `/api/agents/by-owner?owner=${encodeURIComponent(trimmed)}&network=${encodeURIComponent(network)}&first=20&skip=0`,
+          `/api/agents/by-owner?owner=${encodeURIComponent(trimmed)}&network=${encodeURIComponent(network)}&first=20&skip=0&verificationEnvironment=${verificationEnvironment}`,
           { cache: "no-store", signal: controllers[index].signal }
         );
         if (!res.ok) return [] as ComparePick[];
@@ -105,7 +109,7 @@ async function searchAcrossNetworks(query: string, mode: SearchMode = "auto") {
 
       if (effectiveMode === "agentId") {
         const res = await fetch(
-          `/api/agents/by-agent-id?agentId=${encodeURIComponent(trimmed)}&network=${encodeURIComponent(network)}`,
+          `/api/agents/by-agent-id?agentId=${encodeURIComponent(trimmed)}&network=${encodeURIComponent(network)}&verificationEnvironment=${verificationEnvironment}`,
           { cache: "no-store", signal: controllers[index].signal }
         );
         if (!res.ok) return [] as ComparePick[];
@@ -115,7 +119,7 @@ async function searchAcrossNetworks(query: string, mode: SearchMode = "auto") {
 
       if (effectiveMode === "entityId") {
         const res = await fetch(
-          `/api/agents/${encodeURIComponent(trimmed)}?network=${encodeURIComponent(network)}`,
+          `/api/agents/${encodeURIComponent(trimmed)}?network=${encodeURIComponent(network)}&verificationEnvironment=${verificationEnvironment}`,
           { cache: "no-store", signal: controllers[index].signal }
         );
         if (!res.ok) return [] as ComparePick[];
@@ -124,7 +128,7 @@ async function searchAcrossNetworks(query: string, mode: SearchMode = "auto") {
       }
 
       const res = await fetch(
-        `/api/agents?q=${encodeURIComponent(trimmed)}&network=${encodeURIComponent(network)}&pageSize=8`,
+        `/api/agents?q=${encodeURIComponent(trimmed)}&network=${encodeURIComponent(network)}&pageSize=8&verificationEnvironment=${verificationEnvironment}`,
         { cache: "no-store", signal: controllers[index].signal }
       );
       if (!res.ok) return [] as ComparePick[];
@@ -146,10 +150,13 @@ async function searchAcrossNetworks(query: string, mode: SearchMode = "auto") {
   return Array.from(unique.values()).slice(0, 20);
 }
 
-async function resolveDetails(selected: ComparePick[]): Promise<Compared[]> {
+async function resolveDetails(
+  selected: ComparePick[],
+  verificationEnvironment: VerificationEnvironment
+): Promise<Compared[]> {
   const rows = await Promise.all(
     selected.map(async (pick) => {
-      const res = await fetch(`/api/agents/${encodeURIComponent(pick.id)}?network=${encodeURIComponent(pick.network)}`, {
+      const res = await fetch(`/api/agents/${encodeURIComponent(pick.id)}?network=${encodeURIComponent(pick.network)}&verificationEnvironment=${verificationEnvironment}`, {
         cache: "no-store",
       });
       if (!res.ok) return null;
@@ -165,6 +172,7 @@ async function resolveDetails(selected: ComparePick[]): Promise<Compared[]> {
 }
 
 export default function ComparePage() {
+  const { environment } = useVerificationEnvironment();
   const [query, setQuery] = React.useState("");
   const [suggestions, setSuggestions] = React.useState<ComparePick[]>([]);
   const [selected, setSelected] = React.useState<ComparePick[]>([]);
@@ -172,7 +180,6 @@ export default function ComparePage() {
   const [collateralizedByKey, setCollateralizedByKey] = React.useState<Map<string, CollateralizedStatus>>(new Map());
   const [searching, setSearching] = React.useState(false);
   const [loadingCompare, setLoadingCompare] = React.useState(false);
-  const realityQuestions = useRealityQuestions();
 
   React.useEffect(() => {
     const handle = window.setTimeout(async () => {
@@ -182,7 +189,7 @@ export default function ComparePage() {
       }
       setSearching(true);
       try {
-        const found = await searchAcrossNetworks(query);
+        const found = await searchAcrossNetworks(query, "auto", environment);
         const selectedKeys = new Set(selected.map((item) => `${item.network}:${item.id}`));
         setSuggestions(found.filter((item) => !selectedKeys.has(`${item.network}:${item.id}`)));
       } catch {
@@ -193,7 +200,7 @@ export default function ComparePage() {
     }, 260);
 
     return () => window.clearTimeout(handle);
-  }, [query, selected]);
+  }, [environment, query, selected]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -204,7 +211,7 @@ export default function ComparePage() {
       }
       setLoadingCompare(true);
       try {
-        const details = await resolveDetails(selected);
+        const details = await resolveDetails(selected, environment);
         if (!cancelled) setRows(details);
       } catch {
         if (!cancelled) setRows([]);
@@ -216,7 +223,7 @@ export default function ComparePage() {
     return () => {
       cancelled = true;
     };
-  }, [selected]);
+  }, [environment, selected]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -231,7 +238,7 @@ export default function ComparePage() {
           const key = `${row.network}:${row.item.id}`;
           try {
             const res = await fetch(
-              `/api/kleros/verification?agentId=${encodeURIComponent(row.item.agentId)}&network=${encodeURIComponent(row.network)}`,
+              `/api/kleros/verification?agentId=${encodeURIComponent(row.item.agentId)}&network=${encodeURIComponent(row.network)}&verificationEnvironment=${environment}`,
               { cache: "no-store" }
             );
             if (!res.ok) return [key, "unknown"] as const;
@@ -252,23 +259,7 @@ export default function ComparePage() {
     return () => {
       cancelled = true;
     };
-  }, [rows]);
-
-  const abuseReportsByKey = React.useMemo(() => {
-    const counts = new Map<string, number>();
-    if (!rows.length || !realityQuestions.data.length) return counts;
-
-    for (const question of realityQuestions.data) {
-      for (const row of rows) {
-        const matches = doesQuestionMatchAgent(question.question, String(row.item.agentId), row.network);
-        if (!matches) continue;
-        const key = `${row.network}:${row.item.id}`;
-        counts.set(key, (counts.get(key) || 0) + 1);
-      }
-    }
-
-    return counts;
-  }, [rows, realityQuestions.data]);
+  }, [environment, rows]);
 
   const collateralizedLabel = (
     <span className="inline-flex items-center gap-1.5">
@@ -321,7 +312,7 @@ export default function ComparePage() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search agents by name, owner, entity id, or agent id"
+            placeholder="Search by agent number"
             className="h-11 w-full rounded-lg border border-border/50 bg-background pl-10 pr-4 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
           />
         </div>
@@ -433,24 +424,12 @@ export default function ComparePage() {
                 labelClassName="text-[15px] font-semibold"
               />
               <CompareRow
-                label="Abuse reports"
-                values={rows.map((r) => {
-                  const key = `${r.network}:${r.item.id}`;
-                  const value = abuseReportsByKey.get(key);
-                  const amount = value || 0;
-                  return (
-                    <span
-                      key={`${key}-abuse`}
-                      className={
-                        amount >= 1
-                          ? "inline-flex min-w-7 items-center justify-center rounded-full border border-red-500/40 bg-red-500/15 px-2 py-0.5 text-sm font-semibold text-red-500"
-                          : "text-muted-foreground"
-                      }
-                    >
-                      {amount}
-                    </span>
-                  );
-                })}
+                label="Moderation"
+                values={rows.map((r) => (
+                  <span key={`${r.network}:${r.item.id}:moderation`} className="text-amber-300">
+                    Coming soon
+                  </span>
+                ))}
                 labelClassName="font-semibold"
               />
               <CompareRow label="Total feedback" values={rows.map((r) => r.item.totalFeedback || "0")} />

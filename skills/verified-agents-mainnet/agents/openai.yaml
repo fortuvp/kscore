@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verified Agents · Mainnet"
+  short_description: "Submit and curate mainnet verified agents"
+  default_prompt: "Use $verified-agents-mainnet to prepare and verify an Ethereum mainnet Verified Agents submission."

@@ -1,27 +1,21 @@
-import { NextResponse } from "next/server";
-import { createPublicClient, http, parseAbiItem } from "viem";
+import { NextRequest, NextResponse } from "next/server";
+import { createPublicClient, http } from "viem";
 import { GraphQLClient, gql } from "graphql-request";
-import { getAgentByAgentId } from "@/lib/subgraph.handler";
-import { getDisplayName } from "@/lib/format";
-import { AGENT_SUBGRAPH_NETWORKS, type AgentSubgraphNetwork } from "@/lib/agent-networks";
+import { type AgentSubgraphNetwork } from "@/lib/agent-networks";
 import { getAgentNetworkFromChainId, parseChainId } from "@/lib/block-explorer";
 import { loadCurateRegistrationFile } from "@/lib/curate-agent-fallback";
 import {
-  getCurateMode,
-  getCurateRegistryAddress,
   getCurateSubgraphUrl,
   getGoldskyApiKey,
+  getPgtcrDeployment,
   type CurateMode,
 } from "@/lib/curate-config";
 import { fetchPgtcrRegistryInfo } from "@/lib/pgtcr-subgraph";
 import { ERC20_ABI } from "@/lib/abi/erc20";
-import { realityProxyContract } from "@/lib/reality/contracts";
-import { REALITIO_ABI } from "@/lib/abi/realitio";
-import { REALITY_PROXY_ADDRESS } from "@/lib/contracts/addresses";
-import { parseAgentIdFromQuestionText } from "@/lib/reality/abuse-flags";
-import { bytes32ToYesNo } from "@/lib/reality/encoding";
-
-const SUBGRAPH_LOOKUP_TIMEOUT_MS = 2500;
+import {
+  getVerificationEnvironmentFromSearchParams,
+  type VerificationEnvironment,
+} from "@/lib/verification-environment";
 
 type ModerationRow = {
   questionId: `0x${string}`;
@@ -31,14 +25,6 @@ type ModerationRow = {
   finalized: boolean;
   answer: "YES" | "NO" | "UNKNOWN" | "OPEN";
 };
-
-function getSepoliaRpcUrl(): string | null {
-  return process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL || null;
-}
-
-const LOG_NEW_QUESTION = parseAbiItem(
-  "event LogNewQuestion(bytes32 indexed question_id, address indexed user, uint256 template_id, string question, bytes32 indexed content_hash, address arbitrator, uint32 timeout, uint32 opening_ts, uint256 nonce, uint256 created)"
-);
 
 type CurateProp = {
   label?: string | null;
@@ -102,10 +88,10 @@ const GET_LATEST_PGTCR_ITEMS = gql`
   }
 `;
 
-function makeCurateClient(mode: CurateMode) {
-  const url = getCurateSubgraphUrl(mode);
+function makeCurateClient(mode: CurateMode, verificationEnvironment: VerificationEnvironment) {
+  const url = getCurateSubgraphUrl(mode, verificationEnvironment);
   if (mode === "pgtcr") {
-    const apiKey = getGoldskyApiKey();
+    const apiKey = getGoldskyApiKey(verificationEnvironment);
     return new GraphQLClient(url, apiKey ? { headers: { "x-api-key": apiKey } } : undefined);
   }
   return new GraphQLClient(url);
@@ -136,75 +122,28 @@ function isPgtcrAccepted(
   return false;
 }
 
-async function resolveAgentForCurateEntry(
-  key0: string,
-  hintedNetwork: AgentSubgraphNetwork | null
-): Promise<{ id: string; agentId: string; name: string; network: AgentSubgraphNetwork } | null> {
-  if (hintedNetwork) {
-    try {
-      const agent = await Promise.race([
-        getAgentByAgentId(key0, hintedNetwork),
-        new Promise<null>((resolve) => {
-          setTimeout(() => resolve(null), SUBGRAPH_LOOKUP_TIMEOUT_MS);
-        }),
-      ]);
-      if (agent) {
-        return {
-          id: agent.id,
-          agentId: agent.agentId,
-          name: getDisplayName(agent),
-          network: hintedNetwork,
-        };
-      }
-    } catch {
-      // keep trying other networks
-    }
-
-    return null;
-  }
-
-  for (const network of AGENT_SUBGRAPH_NETWORKS) {
-    if (network === hintedNetwork) continue;
-    try {
-      const agent = await Promise.race([
-        getAgentByAgentId(key0, network),
-        new Promise<null>((resolve) => {
-          setTimeout(() => resolve(null), SUBGRAPH_LOOKUP_TIMEOUT_MS);
-        }),
-      ]);
-      if (!agent) continue;
-      return {
-        id: agent.id,
-        agentId: agent.agentId,
-        name: getDisplayName(agent),
-        network,
-      };
-    } catch {
-      // keep trying other networks
-    }
-  }
-
-  return null;
-}
-
 async function getFallbackVerifiedName(key0: string, key1?: string | null) {
-  const registrationFile = await loadCurateRegistrationFile(key1 || null);
+  const registrationFile = await loadCurateRegistrationFile(key1 || null, 1_200);
   return registrationFile?.name || `Agent #${key0}`;
 }
 
-async function getVerifiedAgents() {
+function getVerifiedCurateMode(): CurateMode {
+  return "pgtcr";
+}
+
+async function getVerifiedAgents(verificationEnvironment: VerificationEnvironment) {
   let mode: CurateMode;
   let registryAddress: string;
   let curateClient: GraphQLClient;
   try {
-    mode = getCurateMode();
-    registryAddress = getCurateRegistryAddress(mode).toLowerCase();
-    curateClient = makeCurateClient(mode);
+    mode = getVerifiedCurateMode();
+    registryAddress = getPgtcrDeployment(verificationEnvironment).registryAddress.toLowerCase();
+    curateClient = makeCurateClient(mode, verificationEnvironment);
   } catch {
     return [];
   }
 
-  const verified: Array<{
+  type VerifiedAgent = {
     id: string;
     agentId: string;
     name: string;
@@ -212,7 +151,7 @@ async function getVerifiedAgents() {
     curateItemUrl?: string;
     stake: string;
     verifiedAt: number;
-  }> = [];
+  };
   const seenAgentIds = new Set<string>();
 
   try {
@@ -230,6 +169,7 @@ async function getVerifiedAgents() {
         limit: 40,
       });
 
+      const verified: VerifiedAgent[] = [];
       for (const row of response?.LItem || []) {
         if (verified.length >= 40) break;
         const key0 = row.key0?.trim();
@@ -240,30 +180,17 @@ async function getVerifiedAgents() {
         if (seenAgentIds.has(dedupeKey)) continue;
         seenAgentIds.add(dedupeKey);
 
-        try {
-          const resolved = await resolveAgentForCurateEntry(key0, network);
-          if (!resolved) {
-            verified.push({
-              id: row.itemID,
-              agentId: key0,
-              name: `Curate item ${row.itemID.slice(0, 10)}…`,
-              network: network || "sepolia",
-              curateItemUrl: `https://curate.kleros.io/tcr/11155111/${registryAddress}/${row.itemID}`,
-              stake: "0",
-              verifiedAt: Number(row.latestRequestSubmissionTime) || 0,
-            });
-            continue;
-          }
-          verified.push({
-            ...resolved,
-            stake: "0",
-            verifiedAt: Number(row.latestRequestSubmissionTime) || 0,
-          });
-        } catch {
-          // keep scanning
-        }
+        verified.push({
+          id: row.itemID,
+          agentId: key0,
+          name: `Agent #${key0}`,
+          network: network || "sepolia",
+          curateItemUrl: `${getPgtcrDeployment(verificationEnvironment).curateRegistryUrl}/${row.itemID}`,
+          stake: "0",
+          verifiedAt: Number(row.latestRequestSubmissionTime) || 0,
+        });
       }
-      return verified;
+      return verified.sort((a, b) => b.verifiedAt - a.verifiedAt);
     }
 
     const response = await curateClient.request<{
@@ -287,8 +214,16 @@ async function getVerifiedAgents() {
       limit: 80,
     });
 
+    const candidates: Array<{
+      key0: string;
+      key1: string | null;
+      network: AgentSubgraphNetwork;
+      stake: string;
+      verifiedAt: number;
+    }> = [];
+
     for (const row of response?.items || []) {
-      if (verified.length >= 40) break;
+      if (candidates.length >= 40) break;
       if (
         !isPgtcrAccepted(
           row.status,
@@ -313,51 +248,39 @@ async function getVerifiedAgents() {
       if (seenAgentIds.has(dedupeKey)) continue;
       seenAgentIds.add(dedupeKey);
 
-      try {
-        const resolved = await resolveAgentForCurateEntry(key0, network);
-        if (!resolved) {
-          const fallbackName = await getFallbackVerifiedName(key0, row.metadata?.key1 || null);
-          verified.push({
-            id: key0,
-            agentId: key0,
-            name: fallbackName,
-            network: network || "sepolia",
-            stake: row.stake || "0",
-            verifiedAt: Number(row.includedAt) || 0,
-          });
-          continue;
-        }
-        verified.push({
-          ...resolved,
-          stake: row.stake || "0",
-          verifiedAt: Number(row.includedAt) || 0,
-        });
-      } catch {
-        const fallbackName = await getFallbackVerifiedName(key0, row.metadata?.key1 || null);
-        verified.push({
-          id: key0,
-          agentId: key0,
-          name: fallbackName,
-          network: network || "sepolia",
-          stake: row.stake || "0",
-          verifiedAt: Number(row.includedAt) || 0,
-        });
-      }
+      candidates.push({
+        key0,
+        key1: row.metadata?.key1 || null,
+        network: network || "sepolia",
+        stake: row.stake || "0",
+        verifiedAt: Number(row.includedAt) || 0,
+      });
     }
+
+    const verified = await Promise.all(
+      candidates.map(async (candidate): Promise<VerifiedAgent> => ({
+        id: candidate.key0,
+        agentId: candidate.key0,
+        name: await getFallbackVerifiedName(candidate.key0, candidate.key1),
+        network: candidate.network,
+        stake: candidate.stake,
+        verifiedAt: candidate.verifiedAt,
+      }))
+    );
+    return verified.sort((a, b) => b.verifiedAt - a.verifiedAt);
   } catch {
     return [];
   }
-
-  return verified.sort((a, b) => (b.verifiedAt || 0) - (a.verifiedAt || 0));
 }
 
-async function getPgtcrTokenMeta() {
+async function getPgtcrTokenMeta(verificationEnvironment: VerificationEnvironment) {
   try {
-    const registry = await fetchPgtcrRegistryInfo();
+    const deployment = getPgtcrDeployment(verificationEnvironment);
+    const registry = await fetchPgtcrRegistryInfo(verificationEnvironment);
     const tokenAddress = registry?.token as `0x${string}` | undefined;
     if (!tokenAddress) return { symbol: "TOKEN", decimals: 18 };
 
-    const rpcUrl = getSepoliaRpcUrl();
+    const rpcUrl = deployment.rpcUrls[0] || null;
     if (!rpcUrl) return { symbol: "TOKEN", decimals: 18 };
     const client = createPublicClient({ transport: http(rpcUrl) });
     const [symbol, decimals] = await Promise.all([
@@ -382,131 +305,26 @@ async function getPgtcrTokenMeta() {
   }
 }
 
-async function fetchAllLogs(
-  client: ReturnType<typeof createPublicClient>,
-  address: `0x${string}`,
-  fromBlock: bigint,
-  toBlock: bigint
-) {
-  const chunkSize = 40_000n;
-  const allLogs: Awaited<ReturnType<typeof client.getLogs>> = [];
-
-  for (let start = fromBlock; start <= toBlock; start += chunkSize) {
-    const end = start + chunkSize > toBlock ? toBlock : start + chunkSize;
-    try {
-      const logs = await client.getLogs({
-        address,
-        event: LOG_NEW_QUESTION,
-        fromBlock: start,
-        toBlock: end,
-      });
-      allLogs.push(...logs);
-    } catch {
-      // skip broken chunk and continue
-    }
-  }
-
-  return allLogs;
-}
-
 async function getModerationHighlights(): Promise<ModerationRow[]> {
-  const rpcUrl = getSepoliaRpcUrl();
-  if (!rpcUrl) return [];
-  const client = createPublicClient({ transport: http(rpcUrl) });
-
-  const realitioAddress = (await client.readContract({
-    ...realityProxyContract,
-    functionName: "realitio",
-  })) as `0x${string}`;
-
-  const head = await client.getBlockNumber();
-
-  const toRows = (logs: Awaited<ReturnType<typeof client.getLogs>>) =>
-    logs
-      .map((log) => {
-        const args = (log as { args?: {
-          question_id?: `0x${string}`;
-          created?: bigint;
-          question?: string;
-          arbitrator?: `0x${string}`;
-        } }).args;
-        if (!args?.question_id || !args.question || !args.arbitrator || !args.created) return null;
-        if (args.arbitrator.toLowerCase() !== REALITY_PROXY_ADDRESS.toLowerCase()) return null;
-        return {
-          questionId: args.question_id,
-          created: Number(args.created),
-          question: args.question,
-          agentId: parseAgentIdFromQuestionText(args.question),
-        };
-      })
-      .filter((row): row is { questionId: `0x${string}`; created: number; question: string; agentId: string | null } => !!row)
-      .sort((a, b) => b.created - a.created);
-
-  const windows = [200_000n, 500_000n, 1_500_000n];
-  let parsed: Array<{ questionId: `0x${string}`; created: number; question: string; agentId: string | null }> = [];
-
-  for (const windowSize of windows) {
-    const fromBlock = head > windowSize ? head - windowSize : 0n;
-    const logs = await fetchAllLogs(client, realitioAddress, fromBlock, head);
-    parsed = toRows(logs);
-    if (parsed.length > 0) break;
-  }
-
-  if (!parsed.length) return [];
-
-  const enriched: ModerationRow[] = [];
-  for (const row of parsed.slice(0, 20)) {
-    try {
-      const [best, finalized] = await Promise.all([
-        client.readContract({
-          address: realitioAddress,
-          abi: REALITIO_ABI,
-          functionName: "getBestAnswer",
-          args: [row.questionId],
-        }),
-        client.readContract({
-          address: realitioAddress,
-          abi: REALITIO_ABI,
-          functionName: "isFinalized",
-          args: [row.questionId],
-        }),
-      ]);
-
-      enriched.push({
-        questionId: row.questionId,
-        created: row.created,
-        question: row.question,
-        agentId: row.agentId,
-        finalized: Boolean(finalized),
-        answer: finalized ? bytes32ToYesNo(best as `0x${string}`) : "OPEN",
-      });
-    } catch {
-      enriched.push({
-        questionId: row.questionId,
-        created: row.created,
-        question: row.question,
-        agentId: row.agentId,
-        finalized: false,
-        answer: "OPEN",
-      });
-    }
-  }
-
-  return enriched;
+  return [];
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const verificationEnvironment = getVerificationEnvironmentFromSearchParams(request.nextUrl.searchParams);
   try {
-    const curateMode = getCurateMode();
+    const deployment = getPgtcrDeployment(verificationEnvironment);
     const [verifiedAgents, moderation, tokenMeta] = await Promise.all([
-      getVerifiedAgents(),
+      getVerifiedAgents(verificationEnvironment),
       getModerationHighlights(),
-      curateMode === "pgtcr" ? getPgtcrTokenMeta() : Promise.resolve({ symbol: "TOKEN", decimals: 18 }),
+      getPgtcrTokenMeta(verificationEnvironment),
     ]);
 
     return NextResponse.json({
       success: true,
       generatedAt: new Date().toISOString(),
+      verificationEnvironment,
+      chainId: deployment.chainId,
+      registryAddress: deployment.registryAddress,
       verifiedAgents,
       moderation,
       verifiedStakeSymbol: tokenMeta.symbol,

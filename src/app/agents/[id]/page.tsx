@@ -27,24 +27,26 @@ import { KlerosCurateVerification } from "@/components/kleros-verification";
 import { CurateLinkButton } from "@/components/pgtcr/curate-link-button";
 import { PgtcrDisputePanel } from "@/components/pgtcr/dispute-panel";
 import { EvidenceSection } from "@/components/pgtcr/evidence-section";
-import { CreateOfferDialog } from "@/components/marketplace/create-offer-dialog";
-import { useOffersForAgent } from "@/lib/marketplace/use-offers-for-agent";
-import { formatEther } from "viem";
-import {
-    type AbuseFlag,
-    getFlagsForAgent,
-    isAgentFlagged,
-} from "@/lib/reality/abuse-flags";
-import { useRealityQuestions } from "@/lib/reality/use-questions";
-import { bytes32ToYesNo } from "@/lib/reality/encoding";
-import { doesQuestionMatchAgent } from "@/lib/reality/question-match";
 import { getAgentChainLabel, isAgentSubgraphNetwork } from "@/lib/agent-networks";
 import { getAddressExplorerUrl, getAddressExplorerUrlForNetwork, getTxExplorerUrl, getTxExplorerUrlForNetwork, truncateHash } from "@/lib/block-explorer";
 import { ipfsToGatewayUrl } from "@/lib/ipfs";
-import type { PgtcrItemWithChallengesAndEvidence } from "@/lib/pgtcr-subgraph";
-import { getPgtcrRemovalReason, getResolvedChallengeOutcomeForDisplay } from "@/lib/pgtcr-status";
+import { AgentImage } from "@/components/agents/agent-image";
+import { mergeAgentRegistrationFiles } from "@/lib/agent-metadata";
+import type { AgentHistoryEvent } from "@/types/agent-history";
+import { useVerificationEnvironment } from "@/components/verification-environment-provider";
 
 type Tab = "overview" | "metadata";
+type TimelineTone = "neutral" | "good" | "warn" | "bad";
+type TimelineEvent = {
+    ts: number;
+    badge: string;
+    title: string;
+    detail: string;
+    tone: TimelineTone;
+    actor?: string;
+    txHash?: string;
+    href?: string;
+};
 
 function looksLikeAgentId(value: string): boolean {
     const trimmed = value.trim();
@@ -75,14 +77,85 @@ function getFeedbackEndpointUrl(endpoint: string | null | undefined): string | n
     return null;
 }
 
+function mergeFreshAgent(existing: AgentWithDetails, fresh: AgentWithDetails): AgentWithDetails {
+    const existingLastActivity = Number(existing.lastActivity || "0");
+    const freshLastActivity = Number(fresh.lastActivity || "0");
+
+    return {
+        ...fresh,
+        id: existing.id,
+        agentId: existing.agentId,
+        chainId: existing.chainId,
+        owner: existing.owner,
+        operators: existing.operators,
+        agentURI: existing.agentURI,
+        registrationFile: mergeAgentRegistrationFiles(fresh.registrationFile, existing.registrationFile),
+        createdAt: existing.createdAt,
+        updatedAt: existing.updatedAt,
+        lastActivity:
+            Number.isFinite(freshLastActivity) && freshLastActivity > existingLastActivity
+                ? fresh.lastActivity
+                : existing.lastActivity,
+    };
+}
+
+function describeHistoryEvent(event: AgentHistoryEvent): Omit<TimelineEvent, "ts" | "actor" | "txHash" | "href"> {
+    const detail = event.details;
+    switch (event.kind) {
+        case "registered":
+            return { badge: "Created", title: "Agent registered", detail: "ERC-8004 identity created on chain", tone: "good" };
+        case "uri_updated":
+            return { badge: "URI", title: "Agent URI updated", detail: String(detail.newURI || "Registration URI changed"), tone: "neutral" };
+        case "metadata_set":
+            return { badge: "Metadata", title: "On-chain metadata updated", detail: detail.metadataKey ? `Field: ${detail.metadataKey}` : "A metadata field changed", tone: "neutral" };
+        case "ownership_transferred":
+            return { badge: "Transfer", title: "Ownership transferred", detail: detail.to ? `New owner ${detail.to}` : "The ERC-8004 token changed owner", tone: "neutral" };
+        case "feedback_received": {
+            const tags = [detail.tag1, detail.tag2].filter(Boolean).join(" / ");
+            return {
+                badge: "Feedback",
+                title: "Feedback submitted",
+                detail: `${detail.value !== null && detail.value !== undefined ? `Score ${detail.value}` : "On-chain feedback"}${tags ? ` · ${tags}` : ""}`,
+                tone: "good",
+            };
+        }
+        case "feedback_revoked":
+            return { badge: "Revoked", title: "Feedback revoked", detail: `Feedback #${detail.feedbackIndex || "-"} was revoked`, tone: "warn" };
+        case "feedback_response":
+            return { badge: "Response", title: "Feedback response appended", detail: `Response to feedback #${detail.feedbackIndex || "-"}`, tone: "neutral" };
+        case "validation_requested":
+            return { badge: "Validation", title: "Validation requested", detail: "An ERC-8004 validator was asked to assess this agent", tone: "neutral" };
+        case "validation_responded":
+            return { badge: "Validated", title: "Validation response recorded", detail: detail.tag ? `Tag: ${detail.tag}` : `Response: ${detail.response ?? "recorded"}`, tone: "good" };
+        case "curate_submitted":
+            return { badge: "Verified", title: "Collateral submitted", detail: "Submission added to the Verified Agents Stake Curate registry", tone: "good" };
+        case "curate_challenged":
+            return { badge: "Challenge", title: "Verification challenged", detail: detail.disputeID ? `Kleros dispute #${detail.disputeID}` : "A Curate challenge was opened", tone: "warn" };
+        case "curate_resolved": {
+            const ruling = String(detail.ruling || "").toLowerCase();
+            const lost = ruling === "reject" || ruling === "2" || ruling === "challenger";
+            return { badge: "Resolved", title: "Verification dispute resolved", detail: ruling ? `Ruling: ${detail.ruling}` : "Dispute resolution recorded", tone: lost ? "bad" : "good" };
+        }
+        case "curate_evidence":
+            return { badge: "Evidence", title: "Evidence submitted", detail: `Evidence #${detail.evidenceNumber || "-"} added to the Curate case`, tone: "neutral" };
+        case "curate_appealed":
+            return { badge: "Appeal", title: "Verification ruling appealed", detail: detail.disputeID ? `Kleros dispute #${detail.disputeID}` : "Appeal funding recorded", tone: "warn" };
+        case "curate_withdrawal_started":
+            return { badge: "Withdrawing", title: "Withdrawal initiated", detail: "The stake remains locked until the registry waiting period ends and withdrawal is finalized", tone: "warn" };
+        case "curate_withdrawn":
+            return { badge: "Withdrawn", title: "Stake withdrawn", detail: "The submission is no longer collateralized in Curate", tone: "warn" };
+    }
+}
+
 export default function AgentDetailPage() {
     const params = useParams();
     const searchParams = useSearchParams();
+    const { environment: verificationEnvironment, deployment, withEnvironment } = useVerificationEnvironment();
     const id = params.id as string;
     const rawNetwork = searchParams.get("network");
     const network = isAgentSubgraphNetwork(rawNetwork) ? rawNetwork : "sepolia";
     const lookup = searchParams.get("lookup");
-    const backToAgentsHref = `/agents?network=${network}`;
+    const backToAgentsHref = withEnvironment(`/agents?network=${network}`);
 
     const [agent, setAgent] = useState<AgentWithDetails | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -91,28 +164,13 @@ export default function AgentDetailPage() {
     const [curateFallbackUrl, setCurateFallbackUrl] = useState<string | null>(null);
     const [fallbackItemId, setFallbackItemId] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<Tab>("overview");
-    const [flaggedReports, setFlaggedReports] = useState<AbuseFlag[]>([]);
     const [curateItemId, setCurateItemId] = useState<string | null>(null);
     const [pgtcrRegistryAddress, setPgtcrRegistryAddress] = useState<`0x${string}` | null>(null);
-    const [pgtcrWithdrawingPeriodSec, setPgtcrWithdrawingPeriodSec] = useState<number | null>(null);
-    const [pgtcrItem, setPgtcrItem] = useState<PgtcrItemWithChallengesAndEvidence | null>(null);
-    const [historyTx, setHistoryTx] = useState<{ createdTxHash: string | null; updatedTxHash: string | null } | null>(null);
-    const [curateHistoryTx, setCurateHistoryTx] = useState<{
-        withdrawStartedTxHash: string | null;
-        withdrawStartedAt: number | null;
-        withdrawExecutedTxHash: string | null;
-        withdrawExecutedAt: number | null;
-    } | null>(null);
-
-    const offers = useOffersForAgent(agent?.agentId ? String(agent.agentId) : "");
-    const realityQuestions = useRealityQuestions();
-    const flagged = agent?.agentId ? isAgentFlagged(String(agent.agentId)) : false;
-    const agentOwner = agent?.owner;
-    const agentChainId = agent?.chainId;
-    const agentCreatedAt = agent?.createdAt;
-    const agentUpdatedAt = agent?.updatedAt;
+    const [historyEvents, setHistoryEvents] = useState<AgentHistoryEvent[]>([]);
+    const [isHistoryLoading, setIsHistoryLoading] = useState(false);
 
     useEffect(() => {
+        let cancelled = false;
         async function fetchAgent() {
             setIsLoading(true);
             setIsRefreshingFeedback(false);
@@ -129,10 +187,11 @@ export default function AgentDetailPage() {
 
                     try {
                         const detailResponse = await fetch(
-                            `/api/agents/${encodeURIComponent(detailId)}?network=${encodeURIComponent(network)}`,
+                            withEnvironment(`/api/agents/${encodeURIComponent(detailId)}?network=${encodeURIComponent(network)}`),
                             { cache: "no-store" }
                         );
                         const detailData = await detailResponse.json();
+                        if (cancelled) return null;
                         if (detailData?.success && detailData?.agent) {
                             return detailData.agent as AgentWithDetails;
                         }
@@ -145,11 +204,12 @@ export default function AgentDetailPage() {
 
                 const shouldTryAgentIdFirst = lookup === "agentId" || looksLikeAgentId(id);
                 const primaryUrl = shouldTryAgentIdFirst
-                    ? `/api/agents/by-agent-id?agentId=${encodeURIComponent(id)}&network=${encodeURIComponent(network)}`
-                    : `/api/agents/${encodeURIComponent(id)}?network=${encodeURIComponent(network)}`;
+                    ? withEnvironment(`/api/agents/by-agent-id?agentId=${encodeURIComponent(id)}&network=${encodeURIComponent(network)}`)
+                    : withEnvironment(`/api/agents/${encodeURIComponent(id)}?network=${encodeURIComponent(network)}`);
 
                 const primaryResponse = await fetch(primaryUrl, { cache: "no-store" });
                 const primaryData = await primaryResponse.json();
+                if (cancelled) return;
 
                 if (primaryData?.success && (primaryData?.agent || primaryData?.item)) {
                     const resolvedAgent = await resolvePayloadAgent(primaryData);
@@ -158,10 +218,11 @@ export default function AgentDetailPage() {
                 }
 
                 const fallbackUrl = shouldTryAgentIdFirst
-                    ? `/api/agents/${encodeURIComponent(id)}?network=${encodeURIComponent(network)}`
-                    : `/api/agents/by-agent-id?agentId=${encodeURIComponent(id)}&network=${encodeURIComponent(network)}`;
+                    ? withEnvironment(`/api/agents/${encodeURIComponent(id)}?network=${encodeURIComponent(network)}`)
+                    : withEnvironment(`/api/agents/by-agent-id?agentId=${encodeURIComponent(id)}&network=${encodeURIComponent(network)}`);
                 const fallbackResponse = await fetch(fallbackUrl, { cache: "no-store" });
                 const fallbackData = await fallbackResponse.json();
+                if (cancelled) return;
 
                 if (fallbackData?.success && (fallbackData?.agent || fallbackData?.item)) {
                     const resolvedAgent = await resolvePayloadAgent(fallbackData);
@@ -170,36 +231,40 @@ export default function AgentDetailPage() {
                     setError(fallbackData?.error || primaryData?.error || "Failed to load agent");
                     if (shouldTryAgentIdFirst) {
                         try {
-                            const vRes = await fetch(`/api/kleros/verification?agentId=${encodeURIComponent(id)}&network=${encodeURIComponent(network)}`);
+                            const vRes = await fetch(withEnvironment(`/api/kleros/verification?agentId=${encodeURIComponent(id)}&network=${encodeURIComponent(network)}`));
                             const vJson = await vRes.json();
+                            if (cancelled) return;
                             if (vJson?.success && vJson?.curateItemUrl) setCurateFallbackUrl(vJson.curateItemUrl);
                             if (vJson?.success && vJson?.itemID) setFallbackItemId(vJson.itemID);
                         } catch {}
                     }
                 }
             } catch {
+                if (cancelled) return;
                 setError("Failed to fetch agent details");
                 if (lookup === "agentId") {
                     try {
-                        const vRes = await fetch(`/api/kleros/verification?agentId=${encodeURIComponent(id)}&network=${encodeURIComponent(network)}`);
+                        const vRes = await fetch(withEnvironment(`/api/kleros/verification?agentId=${encodeURIComponent(id)}&network=${encodeURIComponent(network)}`));
                         const vJson = await vRes.json();
+                        if (cancelled) return;
                         if (vJson?.success && vJson?.curateItemUrl) setCurateFallbackUrl(vJson.curateItemUrl);
                         if (vJson?.success && vJson?.itemID) setFallbackItemId(vJson.itemID);
                     } catch {}
                 }
             } finally {
-                setIsLoading(false);
+                if (!cancelled) setIsLoading(false);
             }
         }
         if (id) fetchAgent();
-    }, [id, network, lookup]);
+        return () => {
+            cancelled = true;
+        };
+    }, [id, network, lookup, verificationEnvironment, withEnvironment]);
 
     useEffect(() => {
         if (!agent?.agentId) {
             setCurateItemId(null);
             setPgtcrRegistryAddress(null);
-            setPgtcrWithdrawingPeriodSec(null);
-            setPgtcrItem(null);
             return;
         }
         const agentId = String(agent.agentId);
@@ -207,19 +272,16 @@ export default function AgentDetailPage() {
         async function hydrateCurate() {
             try {
                 const [regRes, verRes] = await Promise.all([
-                    fetch("/api/pgtcr/registry", { cache: "no-store" }),
-                    fetch(`/api/kleros/verification?agentId=${encodeURIComponent(agentId)}&network=${network}`, { cache: "no-store" }),
+                    fetch(withEnvironment("/api/pgtcr/registry"), { cache: "no-store" }),
+                    fetch(withEnvironment(`/api/kleros/verification?agentId=${encodeURIComponent(agentId)}&network=${network}`), { cache: "no-store" }),
                 ]);
-                const regJson = (await regRes.json()) as { success: boolean; registry?: { id: string; withdrawingPeriod?: string | number | null }; error?: string };
+                const regJson = (await regRes.json()) as { success: boolean; registry?: { id: string }; error?: string };
                 const verJson = (await verRes.json()) as { success: boolean; itemID?: string | null; error?: string };
                 if (cancelled) return;
                 if (regJson.success && regJson.registry?.id) {
                     setPgtcrRegistryAddress(regJson.registry.id as `0x${string}`);
-                    const withdrawingPeriod = Number(regJson.registry.withdrawingPeriod ?? NaN);
-                    setPgtcrWithdrawingPeriodSec(Number.isFinite(withdrawingPeriod) && withdrawingPeriod >= 0 ? withdrawingPeriod : null);
                 } else {
                     setPgtcrRegistryAddress(null);
-                    setPgtcrWithdrawingPeriodSec(null);
                 }
                 if (verJson.success && verJson.itemID) {
                     setCurateItemId(verJson.itemID);
@@ -227,43 +289,16 @@ export default function AgentDetailPage() {
                     setCurateItemId(null);
                 }
 
-                if (verJson.success && verJson.itemID) {
-                    try {
-                        const itemRes = await fetch(`/api/pgtcr/item?itemID=${encodeURIComponent(verJson.itemID)}`, { cache: "no-store" });
-                        const itemJson = await itemRes.json();
-                        if (cancelled) return;
-                        if (itemJson?.success && itemJson?.item) setPgtcrItem(itemJson.item);
-                        else setPgtcrItem(null);
-                    } catch {
-                        if (!cancelled) setPgtcrItem(null);
-                    }
-                } else {
-                    setPgtcrItem(null);
-                }
             } catch {
                 if (!cancelled) {
                     setPgtcrRegistryAddress(null);
-                    setPgtcrWithdrawingPeriodSec(null);
                     setCurateItemId(null);
-                    setPgtcrItem(null);
                 }
             }
         }
         void hydrateCurate();
         return () => { cancelled = true; };
-    }, [agent?.agentId, network]);
-
-    useEffect(() => {
-        if (!agent?.agentId) {
-            setFlaggedReports([]);
-            return;
-        }
-
-        const refreshReports = () => setFlaggedReports(getFlagsForAgent(String(agent.agentId)));
-        refreshReports();
-        window.addEventListener("storage", refreshReports);
-        return () => window.removeEventListener("storage", refreshReports);
-    }, [agent?.agentId]);
+    }, [agent?.agentId, network, verificationEnvironment, withEnvironment]);
 
     useEffect(() => {
         const currentAgentId = agent?.agentId ? String(agent.agentId) : "";
@@ -277,7 +312,7 @@ export default function AgentDetailPage() {
             setIsRefreshingFeedback(true);
             try {
                 const res = await fetch(
-                    `/api/agents/by-agent-id?agentId=${encodeURIComponent(currentAgentId)}&network=${encodeURIComponent(network)}&fresh=1`,
+                    withEnvironment(`/api/agents/by-agent-id?agentId=${encodeURIComponent(currentAgentId)}&network=${encodeURIComponent(network)}&fresh=1`),
                     { cache: "no-store" }
                 );
                 const json = await res.json();
@@ -286,7 +321,7 @@ export default function AgentDetailPage() {
                     setAgent((existing) => {
                         if (!existing) return json.item as AgentWithDetails;
                         if (String(existing.agentId || "") !== currentAgentId) return existing;
-                        return json.item as AgentWithDetails;
+                        return mergeFreshAgent(existing, json.item as AgentWithDetails);
                     });
                 }
             } catch {
@@ -300,84 +335,40 @@ export default function AgentDetailPage() {
         return () => {
             cancelled = true;
         };
-    }, [agent?.agentId, network]);
+    }, [agent?.agentId, network, verificationEnvironment, withEnvironment]);
 
     useEffect(() => {
-        if (!agentOwner || !agentChainId || !agentCreatedAt) {
-            setHistoryTx(null);
+        const currentAgentId = agent?.agentId?.trim();
+        if (!currentAgentId) {
+            setHistoryEvents([]);
+            setIsHistoryLoading(false);
             return;
         }
 
         let cancelled = false;
-        async function loadHistoryTx() {
+        async function loadHistory() {
+            setIsHistoryLoading(true);
             try {
                 const params = new URLSearchParams({
-                    chainId: String(agentChainId),
-                    owner: String(agentOwner),
-                    createdAt: String(agentCreatedAt),
-                    updatedAt: String(agentUpdatedAt || agentCreatedAt),
+                    agentId: currentAgentId || "",
+                    network,
+                    verificationEnvironment,
                 });
-                const res = await fetch(`/api/agents/history-tx?${params.toString()}`, { cache: "no-store" });
-                const json = await res.json();
-                if (cancelled) return;
-                if (json?.success) {
-                    setHistoryTx({
-                        createdTxHash: json.createdTxHash || null,
-                        updatedTxHash: json.updatedTxHash || null,
-                    });
-                } else {
-                    setHistoryTx(null);
-                }
+                const response = await fetch(`/api/agents/history?${params.toString()}`, { cache: "no-store" });
+                const payload = (await response.json()) as { success?: boolean; events?: AgentHistoryEvent[] };
+                if (!cancelled) setHistoryEvents(payload.success && Array.isArray(payload.events) ? payload.events : []);
             } catch {
-                if (!cancelled) setHistoryTx(null);
+                if (!cancelled) setHistoryEvents([]);
+            } finally {
+                if (!cancelled) setIsHistoryLoading(false);
             }
         }
 
-        void loadHistoryTx();
+        void loadHistory();
         return () => {
             cancelled = true;
         };
-    }, [agentChainId, agentCreatedAt, agentOwner, agentUpdatedAt]);
-
-    useEffect(() => {
-        const itemId = pgtcrItem?.itemID?.trim();
-        const withdrawStartedAt = Number(pgtcrItem?.withdrawingTimestamp || "0");
-
-        if (!itemId || !Number.isFinite(withdrawStartedAt) || withdrawStartedAt <= 0) {
-            setCurateHistoryTx(null);
-            return;
-        }
-
-        let cancelled = false;
-        async function loadCurateHistoryTx() {
-            try {
-                const params = new URLSearchParams({
-                    itemID: itemId || "",
-                    withdrawStartedAt: String(withdrawStartedAt),
-                });
-                const res = await fetch(`/api/pgtcr/history-tx?${params.toString()}`, { cache: "no-store" });
-                const json = await res.json();
-                if (cancelled) return;
-                if (json?.success) {
-                    setCurateHistoryTx({
-                        withdrawStartedTxHash: json.withdrawStartedTxHash || null,
-                        withdrawStartedAt: Number.isFinite(Number(json.withdrawStartedAt)) ? Number(json.withdrawStartedAt) : null,
-                        withdrawExecutedTxHash: json.withdrawExecutedTxHash || null,
-                        withdrawExecutedAt: Number.isFinite(Number(json.withdrawExecutedAt)) ? Number(json.withdrawExecutedAt) : null,
-                    });
-                } else {
-                    setCurateHistoryTx(null);
-                }
-            } catch {
-                if (!cancelled) setCurateHistoryTx(null);
-            }
-        }
-
-        void loadCurateHistoryTx();
-        return () => {
-            cancelled = true;
-        };
-    }, [pgtcrItem?.itemID, pgtcrItem?.withdrawingTimestamp]);
+    }, [agent?.agentId, network, verificationEnvironment]);
 
     const copyToClipboard = async (text: string, label?: string) => {
         const value = text?.trim();
@@ -438,7 +429,7 @@ export default function AgentDetailPage() {
                     {curateFallbackUrl ? (
                         <div className="mt-4">
                             <Button asChild variant="outline">
-                                <Link href={fallbackItemId ? `/submissions/${encodeURIComponent(fallbackItemId)}` : curateFallbackUrl} target={fallbackItemId ? undefined : "_blank"} rel="noreferrer">Open submission details</Link>
+                                <Link href={fallbackItemId ? withEnvironment(`/submissions/${encodeURIComponent(fallbackItemId)}`) : curateFallbackUrl} target={fallbackItemId ? undefined : "_blank"} rel="noreferrer">Open submission details</Link>
                             </Button>
                         </div>
                     ) : null}
@@ -449,212 +440,54 @@ export default function AgentDetailPage() {
 
     const totalFeedback = parseInt(agent.totalFeedback) || 0;
     const reviewsPending = isRefreshingFeedback && totalFeedback === 0 && agent.feedback.length === 0;
-    const onChainReports = realityQuestions.data.filter((q) => {
-        return doesQuestionMatchAgent(q.question, String(agent.agentId), network);
-    });
-    const flaggedReportsForNetwork = flaggedReports.filter((report) =>
-        realityQuestions.data.some(
-            (q) => q.questionId.toLowerCase() === report.questionId.toLowerCase() && doesQuestionMatchAgent(q.question, String(agent.agentId), network)
-        )
-    );
-    const confirmedOnChainReports = onChainReports.filter(
-        (q) => q.finalized && q.bestAnswer && bytes32ToYesNo(q.bestAnswer) === "YES"
-    );
-    const hasModerationReports = flaggedReportsForNetwork.length > 0 || onChainReports.length > 0;
     const curateViewUrl =
         curateItemId && pgtcrRegistryAddress
-            ? `https://curate.kleros.io/tcr/11155111/${pgtcrRegistryAddress}/${curateItemId}`
+            ? `https://curate.kleros.io/tcr/${deployment.chainId}/${pgtcrRegistryAddress}/${curateItemId}`
             : null;
     const ownerExplorerUrl =
         getAddressExplorerUrl(agent.owner, agent.chainId) ||
         getAddressExplorerUrlForNetwork(agent.owner, network);
-    const createdTxUrl =
-        historyTx?.createdTxHash && getTxExplorerUrl(historyTx.createdTxHash, agent.chainId)
-            ? getTxExplorerUrl(historyTx.createdTxHash, agent.chainId)
-            : null;
-    const updatedTxUrl =
-        historyTx?.updatedTxHash && getTxExplorerUrl(historyTx.updatedTxHash, agent.chainId)
-            ? getTxExplorerUrl(historyTx.updatedTxHash, agent.chainId)
-            : null;
-    const curateWithdrawStartedTxUrl =
-        curateHistoryTx?.withdrawStartedTxHash
-            ? getTxExplorerUrlForNetwork(curateHistoryTx.withdrawStartedTxHash, "sepolia")
-            : null;
-    const curateWithdrawExecutedTxUrl =
-        curateHistoryTx?.withdrawExecutedTxHash
-            ? getTxExplorerUrlForNetwork(curateHistoryTx.withdrawExecutedTxHash, "sepolia")
-            : null;
-    const pgtcrRemovalReason = getPgtcrRemovalReason(pgtcrItem);
-    const inferredWithdrawalExecutedAt =
-        pgtcrRemovalReason === "withdrawn" &&
-        Number(pgtcrItem?.withdrawingTimestamp || "0") > 0 &&
-        pgtcrWithdrawingPeriodSec !== null
-            ? Number(pgtcrItem?.withdrawingTimestamp || "0") + pgtcrWithdrawingPeriodSec
-            : null;
-
-    const timeline: Array<{
-        ts: number;
-        badge: string;
-        title: string;
-        detail: string;
-        tone: "neutral" | "good" | "warn" | "bad";
-        actor?: string;
-        txHash?: string;
-        href?: string;
-    }> = [];
-    const pushEvent = (
-        tsRaw: string | number | null | undefined,
-        badge: string,
-        title: string,
-        detail: string,
-        tone: "neutral" | "good" | "warn" | "bad" = "neutral",
-        extra?: { actor?: string; txHash?: string; href?: string }
-    ) => {
-        const ts = Number(tsRaw);
-        if (!Number.isFinite(ts) || ts <= 0) return;
-        timeline.push({ ts, badge, title, detail, tone, actor: extra?.actor, txHash: extra?.txHash, href: extra?.href });
-    };
-    pushEvent(
-        agent.createdAt,
-        "Created",
-        "Agent created",
-        `${getAgentChainLabel(agent.chainId, network)} registry creation`,
-        "good",
-        { href: createdTxUrl || undefined }
+    const timeline: TimelineEvent[] = historyEvents.map((event) => ({
+        ts: event.timestamp,
+        ...describeHistoryEvent(event),
+        actor: event.actor || undefined,
+        txHash: event.transactionHash || undefined,
+        href: event.externalUrl || undefined,
+    }));
+    const hasExactCreation = historyEvents.some((event) => event.kind === "registered");
+    const hasExactMetadataUpdate = historyEvents.some(
+        (event) => event.kind === "uri_updated" || event.kind === "metadata_set"
     );
-    pushEvent(
-        agent.updatedAt,
-        "Update",
-        "Agent metadata updated",
-        "Registration metadata or settings changed",
-        "neutral",
-        { href: updatedTxUrl || undefined }
-    );
-    if (agent.registrationFile?.active === false) {
-        pushEvent(agent.updatedAt, "Retired", "Agent retired / inactive", "Marked inactive in registration", "warn");
-    }
-    if (pgtcrItem?.includedAt) {
-        const collateral = pgtcrItem.stake ? `${formatEther(BigInt(pgtcrItem.stake))} ETH` : "Collateral submitted";
-        pushEvent(
-            pgtcrItem.includedAt,
-            "Verified",
-            "Collateral submitted",
-            `${collateral}. This stake acts as an economic safety bond for this agent.`,
-            "good",
-            { actor: pgtcrItem.submitter, href: curateItemId && pgtcrRegistryAddress ? `https://curate.kleros.io/tcr/11155111/${pgtcrRegistryAddress}/${curateItemId}` : undefined }
-        );
-    }
-    if (pgtcrItem?.withdrawingTimestamp && Number(pgtcrItem.withdrawingTimestamp) > 0) {
-        pushEvent(
-            curateHistoryTx?.withdrawStartedAt || pgtcrItem.withdrawingTimestamp,
-            "Withdrawing",
-            "Withdraw initiated",
-            "Owner started withdrawal. Item stays registered until the withdrawal period ends.",
-            "warn",
-            {
-                actor: pgtcrItem.submitter,
-                txHash: curateHistoryTx?.withdrawStartedTxHash || undefined,
-                href:
-                    curateWithdrawStartedTxUrl ||
-                    (curateItemId && pgtcrRegistryAddress
-                        ? `https://curate.kleros.io/tcr/11155111/${pgtcrRegistryAddress}/${curateItemId}`
-                        : undefined),
-            }
-        );
-    }
-    if (pgtcrRemovalReason === "withdrawn" && curateHistoryTx?.withdrawExecutedAt) {
-        pushEvent(
-            curateHistoryTx.withdrawExecutedAt,
-            "Withdrawn",
-            "Withdrawal executed",
-            "Withdrawal completed and the submission is no longer collateralized in Curate.",
-            "warn",
-            {
-                actor: pgtcrItem?.submitter,
-                txHash: curateHistoryTx.withdrawExecutedTxHash || undefined,
-                href: curateWithdrawExecutedTxUrl || undefined,
-            }
-        );
-    } else if (pgtcrRemovalReason === "withdrawn" && inferredWithdrawalExecutedAt) {
-        pushEvent(
-            inferredWithdrawalExecutedAt,
-            "Withdrawn",
-            "Withdrawal executed",
-            "Withdrawal completed and the submission is no longer collateralized in Curate.",
-            "warn",
-            {
-                actor: pgtcrItem?.submitter,
-                txHash: curateHistoryTx?.withdrawExecutedTxHash || undefined,
-                href:
-                    curateWithdrawExecutedTxUrl ||
-                    (curateItemId && pgtcrRegistryAddress
-                        ? `https://curate.kleros.io/tcr/11155111/${pgtcrRegistryAddress}/${curateItemId}`
-                        : undefined),
-            }
-        );
-    }
-
-    (pgtcrItem?.challenges || []).forEach((challenge, index) => {
-        const n = (pgtcrItem?.challenges?.length || 0) - index;
-        const disputeHref = challenge.disputeID
-            ? `https://klerosboard.com/#!/dispute/11155111/${challenge.disputeID}`
-            : undefined;
-        pushEvent(
-            challenge.createdAt,
-            "Challenge",
-            `Curate challenge #${n}`,
-            "Challenge opened on Kleros Curate",
-            "warn",
-            {
-                actor: challenge.challenger,
-                href: disputeHref,
-            }
-        );
-        if (challenge.resolutionTime) {
-            const outcome = getResolvedChallengeOutcomeForDisplay({
-                challenge,
-                item: pgtcrItem,
-                challengeIndex: index,
-            });
-            if (outcome === "challenger") {
-                pushEvent(
-                    challenge.resolutionTime,
-                    "Ruled Against",
-                    `Curate challenge #${n} lost`,
-                    "The submitter lost the dispute and the deposit was forfeited.",
-                    "bad",
-                    { href: disputeHref }
-                );
-            } else if (outcome === "requester") {
-                pushEvent(
-                    challenge.resolutionTime,
-                    "Ruled In Favor",
-                    `Curate challenge #${n} won`,
-                    "The submitter won the dispute. The deposit stayed locked and the listing's economic backing increased.",
-                    "good",
-                    { href: disputeHref }
-                );
-            } else {
-                pushEvent(
-                    challenge.resolutionTime,
-                    "Resolved",
-                    `Curate challenge #${n} resolved`,
-                    "Dispute resolution recorded.",
-                    "neutral",
-                    { href: disputeHref }
-                );
-            }
-        }
-    });
-    (pgtcrItem?.evidences || []).forEach((evidence, index) => {
-        const n = (pgtcrItem?.evidences?.length || 0) - index;
-        pushEvent(evidence.timestamp, "Evidence", `Evidence submitted #${n}`, "Evidence added to Curate case", "neutral", {
-            actor: evidence.party,
-            txHash: evidence.txHash,
-            href: evidence.txHash ? `https://sepolia.etherscan.io/tx/${evidence.txHash}` : undefined,
+    const createdAt = Number(agent.createdAt || 0);
+    const updatedAt = Number(agent.updatedAt || 0);
+    if (!hasExactCreation && Number.isFinite(createdAt) && createdAt > 0) {
+        timeline.push({
+            ts: createdAt,
+            badge: "Created",
+            title: "Agent created",
+            detail: `${getAgentChainLabel(agent.chainId, network)} indexed registry timestamp`,
+            tone: "good",
         });
-    });
-    pushEvent(agent.lastActivity, "Update", "Last observed activity", "Latest feedback/validation activity");
+    }
+    if (
+        !hasExactMetadataUpdate &&
+        Number.isFinite(updatedAt) &&
+        updatedAt > 0 &&
+        updatedAt !== createdAt
+    ) {
+        timeline.push({
+            ts: updatedAt,
+            badge: "Update",
+            title: "Agent metadata updated",
+            detail: "Indexed metadata update timestamp",
+            tone: "neutral",
+        });
+    }
+    if (agent.registrationFile?.active === false) {
+        if (Number.isFinite(updatedAt) && updatedAt > 0) {
+            timeline.push({ ts: updatedAt, badge: "Retired", title: "Agent retired / inactive", detail: "Marked inactive in registration", tone: "warn" });
+        }
+    }
     timeline.sort((a, b) => b.ts - a.ts);
 
     const badgeClass = (tone: "neutral" | "good" | "warn" | "bad") =>
@@ -686,16 +519,12 @@ export default function AgentDetailPage() {
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div className="flex flex-col gap-4 sm:flex-row sm:gap-6">
                         <div className="mx-auto h-24 w-24 overflow-hidden rounded-lg bg-muted sm:mx-0">
-                            {agent.registrationFile?.image ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                    src={agent.registrationFile.image}
-                                    alt={getDisplayName(agent)}
-                                    className="h-full w-full object-cover"
-                                />
-                            ) : (
-                                <div className="flex h-full w-full items-center justify-center text-4xl">🤖</div>
-                            )}
+                            <AgentImage
+                                src={agent.registrationFile?.image}
+                                alt={getDisplayName(agent)}
+                                className="h-full w-full object-cover"
+                                fallbackClassName="text-2xl"
+                            />
                         </div>
 
                         <div className="min-w-0">
@@ -716,23 +545,6 @@ export default function AgentDetailPage() {
                                     network={network}
                                 />
                             </div>
-                            {flagged || confirmedOnChainReports.length > 0 ? (
-                                <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
-                                    <div className="font-medium text-amber-200">Flagged as potential abuse</div>
-                                    <div className="text-amber-200/80">
-                                        This agent has moderation activity with a YES abuse outcome.
-                                    </div>
-                                    <div className="mt-2">
-                                        <Link
-                                            href={`/moderation?q=${encodeURIComponent(agent.agentId)}`}
-                                            className="text-amber-200 underline underline-offset-2 hover:text-amber-100"
-                                        >
-                                            Open moderation for this agent
-                                        </Link>
-                                    </div>
-                                </div>
-                            ) : null}
-
                             <p className="mt-2 max-w-2xl break-words text-muted-foreground">
                                 {agent.registrationFile?.description || "No description available."}
                             </p>
@@ -802,10 +614,7 @@ export default function AgentDetailPage() {
                                 <div className="rounded-lg border border-border p-6">
                                     <div className="mb-4 flex items-center gap-2">
                                         <History className="h-5 w-5 text-cyan-300" />
-                                        <div>
-                                            <h2 className="font-semibold">History</h2>
-                                            <p className="text-sm text-muted-foreground">Registry + Curate timeline</p>
-                                        </div>
+                                        <h2 className="font-semibold">History</h2>
                                     </div>
                                     {timeline.length > 0 ? (
                                         <div className="space-y-4">
@@ -829,7 +638,9 @@ export default function AgentDetailPage() {
                                                                 <Badge variant="outline" className={`text-[10px] uppercase tracking-wide ${badgeClass(event.tone)}`}>{event.badge}</Badge>
                                                                 <div className="text-sm font-medium">{event.title}</div>
                                                             </div>
-                                                            <div className="text-xs text-muted-foreground">{formatDateTime(String(event.ts))}</div>
+                                                            <div className="text-xs text-muted-foreground">
+                                                                {event.ts > 0 ? formatDateTime(String(event.ts)) : "Timestamp unavailable"}
+                                                            </div>
                                                         </div>
                                                         <div className="mt-1 text-xs text-muted-foreground">{event.detail}</div>
                                                         {event.actor ? (
@@ -843,6 +654,11 @@ export default function AgentDetailPage() {
                                                     </div>
                                                 </div>
                                             ))}
+                                        </div>
+                                    ) : isHistoryLoading ? (
+                                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                            Loading on-chain history…
                                         </div>
                                     ) : (
                                         <p className="text-sm text-muted-foreground">No timeline events available yet.</p>
@@ -1098,132 +914,21 @@ export default function AgentDetailPage() {
                                                 </Badge>
                                             </div>
                                         )}
-
-                                        <div className="pt-2">
-                                            <CreateOfferDialog
-                                                agentId={String(agent.agentId)}
-                                                agentName={getDisplayName(agent)}
-                                                agentUri={agent.agentURI}
-                                                owner={agent.owner as `0x${string}`}
-                                            />
-                                        </div>
                                     </div>
                                 </div>
 
-                                <div className="rounded-lg border border-border p-6">
-                                    <h2 className="font-semibold mb-2">Offers received</h2>
-                                    <p className="text-sm text-muted-foreground">
-                                        Offers received by this agent.
+                                <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-6">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <h2 className="font-semibold">Moderation</h2>
+                                        <Badge className="border-amber-400/30 bg-amber-400/10 text-amber-200">Coming soon</Badge>
+                                    </div>
+                                    <p className="mt-2 text-sm text-muted-foreground">
+                                        Community reports and arbitration status will appear here when moderation launches.
                                     </p>
-
-                                    <div className="mt-4 space-y-3">
-                                        {offers.status === "loading" ? (
-                                            <div className="text-sm text-muted-foreground">Loading offers…</div>
-                                        ) : offers.status === "error" ? (
-                                            <div className="text-sm text-red-300">{offers.error}</div>
-                                        ) : offers.data.length === 0 ? (
-                                            <div className="text-sm text-muted-foreground">No offers yet.</div>
-                                        ) : (
-                                            offers.data.map((o) => (
-                                                <div key={o.transactionId.toString()} className="rounded-md border border-border p-3">
-                                                    <div className="text-xs text-muted-foreground">Agent ID</div>
-                                                    <div className="font-mono text-sm">{agent.agentId}</div>
-                                                    <div className="mt-2 text-xs text-muted-foreground font-mono">
-                                                        from{" "}
-                                                        {(() => {
-                                                            const senderExplorerUrl = getAddressExplorerUrl(
-                                                                o.sender,
-                                                                agent.chainId
-                                                            ) || getAddressExplorerUrlForNetwork(o.sender, network);
-                                                            return senderExplorerUrl ? (
-                                                                <a
-                                                                    href={senderExplorerUrl}
-                                                                    target="_blank"
-                                                                    rel="noreferrer"
-                                                                    className="underline-offset-2 hover:underline hover:text-foreground"
-                                                                >
-                                                                    {truncateAddress(o.sender)}
-                                                                </a>
-                                                            ) : (
-                                                                truncateAddress(o.sender)
-                                                            );
-                                                        })()}
-                                                    </div>
-                                                    <div className="mt-1 text-sm">
-                                                        {formatEther(o.amount)} <span className="text-muted-foreground">ETH</span>
-                                                    </div>
-                                                </div>
-                                            ))
-                                        )}
-                                    </div>
+                                    <Button className="mt-4" size="sm" variant="outline" disabled>
+                                        Moderation coming soon
+                                    </Button>
                                 </div>
-
-                                {hasModerationReports && (
-                                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-6">
-                                        <h2 className="font-semibold mb-2">Moderation reports</h2>
-                                        <p className="text-sm text-muted-foreground">
-                                            Reports linked to this agent on Reality.eth.
-                                        </p>
-
-                                        <div className="mt-4 space-y-3">
-                                            {onChainReports.map((report) => (
-                                                <div key={report.questionId} className="rounded-md border border-amber-500/20 bg-background/70 p-3">
-                                                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                                                        <a
-                                                            href={`https://reality.eth.limo/app/#!/question/${report.questionId}`}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            className="font-mono text-xs underline-offset-2 hover:underline"
-                                                        >
-                                                            {truncateHash(report.questionId)}
-                                                        </a>
-                                                        <div className="text-xs text-muted-foreground">
-                                                            {report.created ? new Date(Number(report.created) * 1000).toLocaleString() : "Unknown time"}
-                                                        </div>
-                                                    </div>
-                                                    <div className="mt-2 text-xs text-muted-foreground">
-                                                        Status:{" "}
-                                                        {report.finalized
-                                                            ? report.bestAnswer
-                                                                ? bytes32ToYesNo(report.bestAnswer)
-                                                                : "FINALIZED"
-                                                            : "OPEN"}
-                                                    </div>
-                                                </div>
-                                            ))}
-
-                                            {onChainReports.length === 0 &&
-                                                flaggedReportsForNetwork.map((report) => (
-                                                    <div
-                                                        key={`${report.questionId}-${report.flaggedAt}`}
-                                                        className="rounded-md border border-amber-500/20 bg-background/70 p-3"
-                                                    >
-                                                        <div className="flex items-center justify-between gap-2">
-                                                            <a
-                                                                href={`https://reality.eth.limo/app/#!/question/${report.questionId}`}
-                                                                target="_blank"
-                                                                rel="noreferrer"
-                                                                className="font-mono text-xs underline-offset-2 hover:underline"
-                                                            >
-                                                                {truncateHash(report.questionId)}
-                                                            </a>
-                                                            <span className="text-xs text-muted-foreground">
-                                                                {new Date(report.flaggedAt).toLocaleString()}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                        </div>
-
-                                        <div className="mt-4">
-                                            <Button asChild size="sm" variant="outline">
-                                                <Link href={`/moderation?q=${encodeURIComponent(agent.agentId)}`}>
-                                                    Open moderation board
-                                                </Link>
-                                            </Button>
-                                        </div>
-                                    </div>
-                                )}
                             </div>
                         </div>
                         {curateViewUrl ? (

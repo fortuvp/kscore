@@ -6,7 +6,6 @@ import { Search, ChevronLeft, ChevronRight, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CollateralizeAgentDialog } from "@/components/pgtcr/collateralize-agent-dialog";
 import { getAgentSubgraphLabel, isAgentSubgraphNetwork, type AgentSubgraphNetwork } from "@/lib/agent-networks";
 import { getDisplayName } from "@/lib/format";
 import { getAgentNetworkFromChainId, parseChainId } from "@/lib/block-explorer";
@@ -14,6 +13,8 @@ import { loadCurateRegistrationFile } from "@/lib/curate-agent-fallback";
 import { formatEther } from "viem";
 import { useReadContract } from "wagmi";
 import { ERC20_ABI } from "@/lib/abi/erc20";
+import { useVerificationEnvironment } from "@/components/verification-environment-provider";
+import { AgentImage } from "@/components/agents/agent-image";
 
 type VerifiedFilter = "all" | "active" | "challenged" | "removed";
 
@@ -29,7 +30,14 @@ type PgtcrItemRow = {
 };
 
 type ItemsApiResponse =
-  | { success: true; items: PgtcrItemRow[]; skip: number; first: number }
+  | {
+      success: true;
+      verificationEnvironment: "testnet" | "mainnet";
+      chainId: number;
+      items: PgtcrItemRow[];
+      skip: number;
+      first: number;
+    }
   | { success: false; error: string };
 
 type AgentLookupApiResponse =
@@ -82,11 +90,17 @@ function isWithdrawn(item: Pick<PgtcrItemRow, "status" | "withdrawingTimestamp">
   return item.status === "Absent" && Number(item.withdrawingTimestamp || "0") > 0;
 }
 
-function statusTone(status: VerifiedFilter) {
+function statusTone(status: VerifiedFilter, withdrawn = false) {
+  if (withdrawn) return "border-orange-400/40 bg-orange-400/20 text-orange-100";
   if (status === "active") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
   if (status === "challenged") return "border-amber-500/30 bg-amber-500/10 text-amber-300";
   if (status === "removed") return "border-red-500/30 bg-red-500/10 text-red-300";
   return "border-white/15 bg-white/5 text-white/70";
+}
+
+function statusLabel(status: VerifiedFilter, withdrawn = false) {
+  if (withdrawn) return "Withdrawn";
+  return status.toUpperCase();
 }
 
 function formatCollateral(stake: bigint): string {
@@ -98,6 +112,7 @@ function formatCollateral(stake: bigint): string {
 }
 
 export default function VerifiedAgentsPage() {
+  const { environment, deployment, withEnvironment } = useVerificationEnvironment();
   const [filter, setFilter] = React.useState<VerifiedFilter>("all");
   const [sort, setSort] = React.useState<"verifiedNewest" | "verifiedOldest" | "collateralLargest">("verifiedNewest");
   const [query, setQuery] = React.useState("");
@@ -110,23 +125,41 @@ export default function VerifiedAgentsPage() {
   const [previewByKey, setPreviewByKey] = React.useState<Record<string, AgentPreview>>({});
   const [pgtcrToken, setPgtcrToken] = React.useState<`0x${string}` | null>(null);
 
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
       const skip = page * pageSize;
-      const res = await fetch(`/api/pgtcr/items?skip=${skip}&first=${pageSize}`, { cache: "no-store" });
+      const params = new URLSearchParams({
+        skip: String(skip),
+        first: String(pageSize),
+        verificationEnvironment: environment,
+      });
+      const res = await fetch(`/api/pgtcr/items?${params.toString()}`, {
+        cache: "no-store",
+        signal,
+      });
       const json = (await res.json()) as ItemsApiResponse;
+      if (signal?.aborted) return;
       if (json.success) setItems(json.items || []);
       else setItems([]);
     } catch {
-      setItems([]);
+      if (!signal?.aborted) setItems([]);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
-  }, [page]);
+  }, [environment, page]);
 
   React.useEffect(() => {
-    void load();
+    setPage(0);
+    setItems([]);
+    setPreviewByKey({});
+    setPgtcrToken(null);
+  }, [environment]);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
   }, [load]);
 
 
@@ -134,7 +167,7 @@ export default function VerifiedAgentsPage() {
     let cancelled = false;
     async function loadToken() {
       try {
-        const res = await fetch('/api/pgtcr/registry', { cache: 'no-store' });
+        const res = await fetch(`/api/pgtcr/registry?verificationEnvironment=${environment}`, { cache: 'no-store' });
         const json = await res.json();
         if (!cancelled && json?.success && json?.registry?.token) {
           setPgtcrToken(json.registry.token as `0x${string}`);
@@ -143,7 +176,7 @@ export default function VerifiedAgentsPage() {
     }
     void loadToken();
     return () => { cancelled = true; };
-  }, []);
+  }, [environment]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -213,6 +246,7 @@ export default function VerifiedAgentsPage() {
     address: (pgtcrToken ?? undefined) as `0x${string}` | undefined,
     abi: ERC20_ABI,
     functionName: 'symbol',
+    chainId: deployment.chainId,
     query: { enabled: Boolean(pgtcrToken) },
   }).data as string | undefined;
 
@@ -290,7 +324,7 @@ export default function VerifiedAgentsPage() {
         missing.map(async (r) => {
           try {
             const res = await fetch(
-              `/api/agents/by-agent-id?agentId=${encodeURIComponent(r.agentId)}&network=${encodeURIComponent(r.network)}`,
+              `/api/agents/by-agent-id?agentId=${encodeURIComponent(r.agentId)}&network=${encodeURIComponent(r.network)}&verificationEnvironment=${environment}`,
               { cache: "no-store" }
             );
             const json = (await res.json()) as AgentLookupApiResponse;
@@ -351,12 +385,10 @@ export default function VerifiedAgentsPage() {
     return () => {
       cancelled = true;
     };
-  }, [derived, previewByKey]);
+  }, [derived, environment, previewByKey]);
 
   const canPrev = page > 0;
   const canNext = items.length === pageSize; // best-effort
-
-  const [submitAgentId, setSubmitAgentId] = React.useState("");
 
   return (
     <div className="container mx-auto max-w-7xl overflow-x-hidden px-4 py-10 sm:px-6">
@@ -373,21 +405,9 @@ export default function VerifiedAgentsPage() {
           </ul>
         </div>
 
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
-            <input
-              value={submitAgentId}
-              onChange={(e) => setSubmitAgentId(e.target.value)}
-              placeholder="Agent ID"
-              className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm sm:w-40"
-            />
-            <CollateralizeAgentDialog
-              agentId={submitAgentId.trim() || "0"}
-              trigger={<Button disabled={!submitAgentId.trim()}>Submit Agent</Button>}
-            />
-          </div>
-          <div className="text-[11px] text-muted-foreground">Tip: paste the Agent ID, then submit.</div>
-        </div>
+        <Button asChild className="w-full sm:w-auto">
+          <Link href={withEnvironment("/submit")}>Submit Your Agent</Link>
+        </Button>
       </div>
 
       <div className="mb-4 grid gap-3 lg:grid-cols-3">
@@ -409,7 +429,7 @@ export default function VerifiedAgentsPage() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by agent id or name"
+            placeholder="Search by agent number"
             className="h-9 w-full rounded-md border border-border bg-background pl-10 pr-3 text-sm"
           />
         </div>
@@ -434,6 +454,7 @@ export default function VerifiedAgentsPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {derived.map(({ item, key0, network, status, collateral }) => {
+            const withdrawn = isWithdrawn(item);
             const key = `${network}:${key0}`;
             const preview = previewByKey[key];
             const name = preview?.name || `Agent ${key0 || item.itemID.slice(0, 10)}`;
@@ -441,19 +462,20 @@ export default function VerifiedAgentsPage() {
             const resolvedNetwork = preview?.network || network;
             const useAgentIdLookup = !preview?.id || !isResolved || preview.id === preview.agentId || preview.id === key0;
             const targetId = useAgentIdLookup ? (preview?.agentId || key0) : preview.id;
-            const href = targetId
-              ? `/agents/${encodeURIComponent(targetId)}?network=${resolvedNetwork}${useAgentIdLookup ? "&lookup=agentId" : ""}`
-              : `/submissions/${encodeURIComponent(item.itemID)}`;
+            const href = withEnvironment(
+              targetId
+                ? `/agents/${encodeURIComponent(targetId)}?network=${resolvedNetwork}${useAgentIdLookup ? "&lookup=agentId" : ""}`
+                : `/submissions/${encodeURIComponent(item.itemID)}`
+            );
 
             const cardContent = (
               <>
                 <div className="h-28 w-full overflow-hidden bg-gradient-to-br from-cyan-900/30 via-emerald-900/20 to-slate-900/20">
-                  {preview?.image ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={preview.image} alt={name} className="h-full w-full object-cover transition group-hover:scale-[1.03]" />
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-xs text-muted-foreground">No image</div>
-                  )}
+                  <AgentImage
+                    src={preview?.image}
+                    alt={name}
+                    className="h-full w-full object-cover transition group-hover:scale-[1.03]"
+                  />
                 </div>
                 <div className="p-3">
                   <div className="truncate text-base font-semibold">{name}</div>
@@ -466,17 +488,13 @@ export default function VerifiedAgentsPage() {
                     <span className="truncate">{getAgentSubgraphLabel(resolvedNetwork)}</span>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <Badge className={statusTone(status)}>{status.toUpperCase()}</Badge>
-                    {Number(item.withdrawingTimestamp || "0") > 0 ? (
+                    <Badge className={statusTone(status, withdrawn)}>{statusLabel(status, withdrawn)}</Badge>
+                    {Number(item.withdrawingTimestamp || "0") > 0 && !withdrawn ? (
                       <Badge
                         variant="outline"
-                        className={
-                          isWithdrawn(item)
-                            ? "text-[11px] border-red-400/30 bg-red-500/10 text-red-300"
-                            : "text-[11px] border-amber-400/30 bg-amber-500/10 text-amber-300"
-                        }
+                        className="text-[11px] border-amber-400/30 bg-amber-500/10 text-amber-300"
                       >
-                        {isWithdrawn(item) ? "Withdrawn" : "Withdrawing"}
+                        Withdrawing
                       </Badge>
                     ) : null}
                   </div>
@@ -496,8 +514,22 @@ export default function VerifiedAgentsPage() {
           })}
 
           {!derived.length ? (
-            <div className="col-span-full rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
-              No agents for this filter.
+            <div className="col-span-full rounded-xl border border-dashed border-cyan-300/25 bg-cyan-300/[0.04] p-8 text-center">
+              <div className="text-base font-medium text-white">
+                {environment === "mainnet" && filter === "all"
+                  ? "No verified agents on Ethereum mainnet yet"
+                  : "No agents for this filter"}
+              </div>
+              <p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">
+                {environment === "mainnet" && filter === "all"
+                  ? "Be the first to submit an ERC-8004 agent to the mainnet Stake Curate registry. Mainnet submissions use real funds."
+                  : `Try another status filter or switch the verification registry from ${deployment.label}.`}
+              </p>
+              {environment === "mainnet" && filter === "all" ? (
+                <Button asChild size="sm" className="mt-4">
+                  <Link href={withEnvironment("/submit")}>Submit the first agent</Link>
+                </Button>
+              ) : null}
             </div>
           ) : null}
         </div>

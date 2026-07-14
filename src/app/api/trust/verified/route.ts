@@ -1,24 +1,19 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { GraphQLClient, gql } from "graphql-request";
 import { getAgentByAgentId } from "@/lib/subgraph.handler";
 import { getDisplayName } from "@/lib/format";
 import { AGENT_SUBGRAPH_NETWORKS, type AgentSubgraphNetwork } from "@/lib/agent-networks";
 import { getAgentNetworkFromChainId, parseChainId } from "@/lib/block-explorer";
 import {
-  getCurateMode,
-  getCurateRegistryAddress,
-  getCurateSubgraphUrl,
   getGoldskyApiKey,
-  type CurateMode,
+  getPgtcrDeployment,
 } from "@/lib/curate-config";
+import {
+  getVerificationEnvironmentFromSearchParams,
+  type VerificationEnvironment,
+} from "@/lib/verification-environment";
 
 const SUBGRAPH_LOOKUP_TIMEOUT_MS = 6000;
-
-type CurateProp = {
-  label?: string | null;
-  value?: string | null;
-  isIdentifier?: boolean | null;
-};
 
 type VerifiedStatus = "active" | "challenged" | "removed";
 
@@ -35,28 +30,6 @@ type ResolvedTrustRow = {
   curateStatus: string;
   updatedAt: number;
 };
-
-const GET_LATEST_GTCR_ITEMS = gql`
-  query LatestGtcrItems($registry: String!, $limit: Int!) {
-    LItem(
-      where: {
-        registryAddress: { _eq: $registry }
-      }
-      order_by: { latestRequestSubmissionTime: desc }
-      limit: $limit
-    ) {
-      itemID
-      key0
-      status
-      latestRequestSubmissionTime
-      props {
-        label
-        value
-        isIdentifier
-      }
-    }
-  }
-`;
 
 const GET_LATEST_PGTCR_ITEMS = gql`
   query LatestPgtcrItems($registry: Bytes!, $limit: Int!) {
@@ -81,21 +54,13 @@ const GET_LATEST_PGTCR_ITEMS = gql`
   }
 `;
 
-function makeCurateClient(mode: CurateMode) {
-  const url = getCurateSubgraphUrl(mode);
-  if (mode === "pgtcr") {
-    const apiKey = getGoldskyApiKey();
-    return new GraphQLClient(url, apiKey ? { headers: { "x-api-key": apiKey } } : undefined);
-  }
-  return new GraphQLClient(url);
-}
-
-function getNetworkFromCurateProps(props: CurateProp[] | null | undefined): AgentSubgraphNetwork | null {
-  const key2 = props?.find((prop) => prop.label?.trim().toLowerCase() === "key2")?.value?.trim();
-  if (!key2) return null;
-  const chainId = parseChainId(key2);
-  if (!chainId) return null;
-  return getAgentNetworkFromChainId(chainId);
+function makeCurateClient(verificationEnvironment: VerificationEnvironment) {
+  const deployment = getPgtcrDeployment(verificationEnvironment);
+  const apiKey = getGoldskyApiKey(verificationEnvironment);
+  return new GraphQLClient(
+    deployment.subgraphUrl,
+    apiKey ? { headers: { "x-api-key": apiKey } } : undefined
+  );
 }
 
 function isPgtcrAccepted(
@@ -121,12 +86,6 @@ function isPgtcrAccepted(
   }
 
   return false;
-}
-
-function mapGtcrStatus(status: string): VerifiedStatus {
-  if (status === "Registered") return "active";
-  if (status === "Absent") return "removed";
-  return "challenged";
 }
 
 function mapPgtcrStatus(
@@ -189,10 +148,10 @@ async function resolveAgentForCurateEntry(
   return null;
 }
 
-async function getTrustRows(): Promise<ResolvedTrustRow[]> {
-  const mode = getCurateMode();
-  const registryAddress = getCurateRegistryAddress(mode).toLowerCase();
-  const curateClient = makeCurateClient(mode);
+async function getTrustRows(verificationEnvironment: VerificationEnvironment): Promise<ResolvedTrustRow[]> {
+  const deployment = getPgtcrDeployment(verificationEnvironment);
+  const registryAddress = deployment.registryAddress.toLowerCase();
+  const curateClient = makeCurateClient(verificationEnvironment);
 
   const candidates = new Map<
     string,
@@ -205,37 +164,7 @@ async function getTrustRows(): Promise<ResolvedTrustRow[]> {
     }
   >();
 
-  if (mode === "gtcr") {
-    const response = await curateClient.request<{
-      LItem: Array<{
-        itemID: string;
-        key0: string | null;
-        status: string;
-        latestRequestSubmissionTime: number;
-        props?: CurateProp[];
-      }>;
-    }>(GET_LATEST_GTCR_ITEMS, {
-      registry: registryAddress,
-      limit: 160,
-    });
-
-    for (const row of response?.LItem || []) {
-      const key0 = row.key0?.trim();
-      if (!key0) continue;
-      const network = getNetworkFromCurateProps(row.props);
-      const dedupeKey = `${network || "unknown"}:${key0}`;
-      if (candidates.has(dedupeKey)) continue;
-      candidates.set(dedupeKey, {
-        key0,
-        network,
-        status: mapGtcrStatus(row.status),
-        curateStatus: row.status,
-        updatedAt: Number(row.latestRequestSubmissionTime) || 0,
-      });
-      if (candidates.size >= 60) break;
-    }
-  } else {
-    const response = await curateClient.request<{
+  const response = await curateClient.request<{
       items: Array<{
         itemID: string;
         status: string;
@@ -249,35 +178,34 @@ async function getTrustRows(): Promise<ResolvedTrustRow[]> {
           reinclusionPeriod: string;
         };
       }>;
-    }>(GET_LATEST_PGTCR_ITEMS, {
-      registry: registryAddress,
-      limit: 200,
-    });
+  }>(GET_LATEST_PGTCR_ITEMS, {
+    registry: registryAddress,
+    limit: 200,
+  });
 
-    for (const row of response?.items || []) {
-      const key0 = row.metadata?.key0?.trim();
-      if (!key0) continue;
-      const network = (() => {
-        const chainId = parseChainId(row.metadata?.key2 || "");
-        if (!chainId) return null;
-        return getAgentNetworkFromChainId(chainId);
-      })();
-      const dedupeKey = `${network || "unknown"}:${key0}`;
-      if (candidates.has(dedupeKey)) continue;
-      candidates.set(dedupeKey, {
-        key0,
-        network,
-        status: mapPgtcrStatus(
-          row.status,
-          row.includedAt,
-          row.registry?.submissionPeriod,
-          row.registry?.reinclusionPeriod
-        ),
-        curateStatus: row.status,
-        updatedAt: Number(row.includedAt) || 0,
-      });
-      if (candidates.size >= 60) break;
-    }
+  for (const row of response?.items || []) {
+    const key0 = row.metadata?.key0?.trim();
+    if (!key0) continue;
+    const network = (() => {
+      const chainId = parseChainId(row.metadata?.key2 || "");
+      if (!chainId) return null;
+      return getAgentNetworkFromChainId(chainId);
+    })();
+    const dedupeKey = `${network || "unknown"}:${key0}`;
+    if (candidates.has(dedupeKey)) continue;
+    candidates.set(dedupeKey, {
+      key0,
+      network,
+      status: mapPgtcrStatus(
+        row.status,
+        row.includedAt,
+        row.registry?.submissionPeriod,
+        row.registry?.reinclusionPeriod
+      ),
+      curateStatus: row.status,
+      updatedAt: Number(row.includedAt) || 0,
+    });
+    if (candidates.size >= 60) break;
   }
 
   const resolved = await Promise.all(
@@ -320,12 +248,17 @@ async function getTrustRows(): Promise<ResolvedTrustRow[]> {
     .slice(0, 80);
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const verificationEnvironment = getVerificationEnvironmentFromSearchParams(request.nextUrl.searchParams);
   try {
-    const items = await getTrustRows();
+    const deployment = getPgtcrDeployment(verificationEnvironment);
+    const items = await getTrustRows(verificationEnvironment);
     return NextResponse.json({
       success: true,
       generatedAt: new Date().toISOString(),
+      verificationEnvironment,
+      chainId: deployment.chainId,
+      registryAddress: deployment.registryAddress,
       items,
     });
   } catch (error) {

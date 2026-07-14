@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GraphQLClient, gql } from "graphql-request";
-import {
-  getCurateRegistryAddress,
-  getCurateSubgraphUrl,
-  getGoldskyApiKey,
-} from "@/lib/curate-config";
+import { gql } from "graphql-request";
+import { getPgtcrDeployment } from "@/lib/curate-config";
+import { makePgtcrSubgraphClient } from "@/lib/pgtcr-subgraph";
+import { getVerificationEnvironmentFromSearchParams } from "@/lib/verification-environment";
 
 const ITEMS_QUERY = gql`
   query Items($registry: Bytes!, $skip: Int!, $first: Int!) {
@@ -30,13 +28,12 @@ const ITEMS_QUERY = gql`
 export async function GET(request: NextRequest) {
   const skip = Math.max(0, Number(request.nextUrl.searchParams.get("skip") || "0") || 0);
   const first = Math.min(100, Math.max(1, Number(request.nextUrl.searchParams.get("first") || "40") || 40));
+  const verificationEnvironment = getVerificationEnvironmentFromSearchParams(request.nextUrl.searchParams);
 
   try {
-    const url = getCurateSubgraphUrl("pgtcr");
-    const apiKey = getGoldskyApiKey();
-    const client = new GraphQLClient(url, apiKey ? { headers: { "x-api-key": apiKey } } : undefined);
-
-    const registry = getCurateRegistryAddress("pgtcr").toLowerCase();
+    const deployment = getPgtcrDeployment(verificationEnvironment);
+    const client = makePgtcrSubgraphClient(verificationEnvironment);
+    const registry = deployment.registryAddress.toLowerCase();
 
     const res = await client.request<{ items: unknown[] }>(ITEMS_QUERY, {
       registry,
@@ -44,7 +41,16 @@ export async function GET(request: NextRequest) {
       first,
     });
 
-    return NextResponse.json({ success: true, registry, skip, first, items: res.items || [] });
+    return NextResponse.json({
+      success: true,
+      verificationEnvironment,
+      chainId: deployment.chainId,
+      registryAddress: registry,
+      registry,
+      skip,
+      first,
+      items: res.items || [],
+    });
   } catch (error) {
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : "Failed to fetch items" },

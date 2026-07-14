@@ -1,16 +1,15 @@
 import { GraphQLClient, gql } from "graphql-request";
+import { getGoldskyApiKey, getPgtcrDeployment } from "@/lib/curate-config";
 import {
-  getCurateRegistryAddress,
-  getCurateSubgraphUrl,
-  getGoldskyApiKey,
-  type CurateMode,
-} from "@/lib/curate-config";
+  DEFAULT_VERIFICATION_ENVIRONMENT,
+  type VerificationEnvironment,
+} from "@/lib/verification-environment";
 
-const PGTCR_MODE: CurateMode = "pgtcr";
-
-function makeGoldskyClient() {
-  const url = getCurateSubgraphUrl(PGTCR_MODE);
-  const apiKey = getGoldskyApiKey();
+export function makePgtcrSubgraphClient(
+  verificationEnvironment: VerificationEnvironment = DEFAULT_VERIFICATION_ENVIRONMENT
+) {
+  const url = getPgtcrDeployment(verificationEnvironment).subgraphUrl;
+  const apiKey = getGoldskyApiKey(verificationEnvironment);
   return new GraphQLClient(url, apiKey ? { headers: { "x-api-key": apiKey } } : undefined);
 }
 
@@ -74,9 +73,11 @@ const REGISTRY_QUERY = gql`
   }
 `;
 
-export async function fetchPgtcrRegistryInfo(): Promise<PgtcrRegistryInfo> {
-  const registryAddress = getCurateRegistryAddress(PGTCR_MODE).toLowerCase();
-  const client = makeGoldskyClient();
+export async function fetchPgtcrRegistryInfo(
+  verificationEnvironment: VerificationEnvironment = DEFAULT_VERIFICATION_ENVIRONMENT
+): Promise<PgtcrRegistryInfo> {
+  const registryAddress = getPgtcrDeployment(verificationEnvironment).registryAddress.toLowerCase();
+  const client = makePgtcrSubgraphClient(verificationEnvironment);
   const res = await client.request<{ registry: PgtcrRegistryInfo | null }>(REGISTRY_QUERY, {
     id: registryAddress,
   });
@@ -99,6 +100,14 @@ export type PgtcrItemWithChallengesAndEvidence = {
     key1?: string | null;
     key2?: string | null;
   } | null;
+  submissions: Array<{
+    submissionID: string;
+    createdAt: string;
+    creationTx: string;
+    submitter: string;
+    withdrawingTimestamp: string;
+    withdrawingTx?: string | null;
+  }>;
   evidences: Array<{
     party: string;
     URI: string;
@@ -117,7 +126,9 @@ export type PgtcrItemWithChallengesAndEvidence = {
     challengeID: string;
     disputeID: string;
     createdAt: string;
+    creationTx?: string | null;
     resolutionTime?: string | null;
+    resolutionTx?: string | null;
     challenger: string;
     challengerStake: string;
     itemStake: string;
@@ -133,6 +144,8 @@ export type PgtcrItemWithChallengesAndEvidence = {
       amountPaidChallenger: string;
       appealed: boolean;
       appealedAt?: string | null;
+      txHashAppealPossible?: string | null;
+      txHashAppealDecision?: string | null;
       creationTime: string;
     }>;
   }>;
@@ -151,6 +164,14 @@ const ITEM_BY_ITEM_ID = gql`
       submitter
       withdrawingTimestamp
       metadata { key0 key1 key2 }
+      submissions(orderBy: createdAt, orderDirection: desc, first: 10) {
+        submissionID
+        createdAt
+        creationTx
+        submitter
+        withdrawingTimestamp
+        withdrawingTx
+      }
       evidences(orderBy: number, orderDirection: desc, first: 50) {
         party
         URI
@@ -163,7 +184,9 @@ const ITEM_BY_ITEM_ID = gql`
         challengeID
         disputeID
         createdAt
+        creationTx
         resolutionTime
+        resolutionTx
         challenger
         challengerStake
         itemStake
@@ -179,6 +202,8 @@ const ITEM_BY_ITEM_ID = gql`
           amountPaidChallenger
           appealed
           appealedAt
+          txHashAppealPossible
+          txHashAppealDecision
           creationTime
         }
       }
@@ -186,16 +211,22 @@ const ITEM_BY_ITEM_ID = gql`
   }
 `;
 
-export async function fetchPgtcrItemByItemEntityId(itemEntityId: string): Promise<PgtcrItemWithChallengesAndEvidence | null> {
-  const client = makeGoldskyClient();
+export async function fetchPgtcrItemByItemEntityId(
+  itemEntityId: string,
+  verificationEnvironment: VerificationEnvironment = DEFAULT_VERIFICATION_ENVIRONMENT
+): Promise<PgtcrItemWithChallengesAndEvidence | null> {
+  const client = makePgtcrSubgraphClient(verificationEnvironment);
   const res = await client.request<{ item: PgtcrItemWithChallengesAndEvidence | null }>(ITEM_BY_ITEM_ID, {
     id: itemEntityId,
   });
   return res.item;
 }
 
-export async function fetchPgtcrItemByItemIdBytes(itemIdBytes32: string): Promise<PgtcrItemWithChallengesAndEvidence | null> {
-  const registryAddress = getCurateRegistryAddress(PGTCR_MODE).toLowerCase();
+export async function fetchPgtcrItemByItemIdBytes(
+  itemIdBytes32: string,
+  verificationEnvironment: VerificationEnvironment = DEFAULT_VERIFICATION_ENVIRONMENT
+): Promise<PgtcrItemWithChallengesAndEvidence | null> {
+  const registryAddress = getPgtcrDeployment(verificationEnvironment).registryAddress.toLowerCase();
   const id = `${itemIdBytes32.toLowerCase()}@${registryAddress}`;
-  return fetchPgtcrItemByItemEntityId(id);
+  return fetchPgtcrItemByItemEntityId(id, verificationEnvironment);
 }

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verified Agents · Sepolia"
+  short_description: "Submit and curate Sepolia verified agents"
+  default_prompt: "Use $verified-agents-sepolia to prepare and verify a Sepolia Verified Agents submission."

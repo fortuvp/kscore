@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+  "skills": [
+    {
+      "name": "verified-agents-sepolia",
+      "type": "archive",
+      "description": "Submit ERC-8004 agents to, inspect, challenge, appeal, provide evidence for, or withdraw from the Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum Sepolia. Use for testnet Verified Agents registry operations, submission drafting, duplicate checks, policy and schema validation, live stake or arbitration-cost reads, and PGTCR dispute lifecycle work at registry 0x3162df9669affa8b6b6ff2147afa052249f00447.",
+      "url": "http://localhost:3000/skills/verified-agents-sepolia.tar.gz",
+      "digest": "sha256:82ae02de355dcfe3bd3ccd0677e4dc3058069d4b39f0b664282248985d94de90"
+    },
+    {
+      "name": "verified-agents-mainnet",
+      "type": "archive",
+      "description": "Submit ERC-8004 agents to, inspect, challenge, appeal, provide evidence for, or withdraw from the Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum mainnet. Use for production Verified Agents registry operations, submission drafting, duplicate checks, policy and schema validation, live stake or arbitration-cost reads, and PGTCR dispute lifecycle work at registry 0x118155741eea23f56b3bd59b0c1342d5daaa6d07.",
+      "url": "http://localhost:3000/skills/verified-agents-mainnet.tar.gz",
+      "digest": "sha256:637c22be60dede99d5a70bb90d99301231f9314d4fc3cc86920f74ebef5e915c"
+    }
+  ]
+}

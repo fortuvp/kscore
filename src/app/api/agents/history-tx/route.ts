@@ -132,7 +132,7 @@ export async function GET(request: NextRequest) {
     const client = createPublicClient({ transport: http(rpcUrl) });
     const head = await client.getBlockNumber();
 
-    let createdTxHash =
+    const createdTxHash =
       (await findNearestOwnerTx({
         client,
         head,

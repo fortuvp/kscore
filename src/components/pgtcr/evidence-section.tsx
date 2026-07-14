@@ -2,16 +2,17 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { useAccount, useChainId, useWriteContract } from "wagmi";
-import { sepolia } from "wagmi/chains";
+import { useAccount, useChainId, usePublicClient, useWriteContract } from "wagmi";
 
 import PermanentGTCRAbi from "@/lib/abi/PermanentGTCR.json";
+import { executeConfirmedTransaction } from "@/lib/confirmed-transaction";
 import { uploadFileToIpfs, uploadJsonToIpfs, ipfsToGatewayUrl } from "@/lib/ipfs";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useVerificationEnvironment } from "@/components/verification-environment-provider";
 
 type ItemApiResponse =
   | {
@@ -37,13 +38,15 @@ type ItemApiResponse =
   | { success: false; error: string };
 
 export function EvidenceSection(props: { itemID: string; registryAddress: `0x${string}` }) {
+  const { environment } = useVerificationEnvironment();
   const [data, setData] = React.useState<ItemApiResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
 
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/pgtcr/item?itemID=${encodeURIComponent(props.itemID)}`, { cache: "no-store" });
+      const query = new URLSearchParams({ itemID: props.itemID, verificationEnvironment: environment });
+      const res = await fetch(`/api/pgtcr/item?${query}`, { cache: "no-store" });
       const json = (await res.json()) as ItemApiResponse;
       setData(json);
     } catch {
@@ -51,7 +54,7 @@ export function EvidenceSection(props: { itemID: string; registryAddress: `0x${s
     } finally {
       setLoading(false);
     }
-  }, [props.itemID]);
+  }, [environment, props.itemID]);
 
   React.useEffect(() => {
     void load();
@@ -122,10 +125,12 @@ function SubmitEvidenceDialog(props: {
   registryAddress: `0x${string}`;
   onSubmitted: () => void;
 }) {
+  const { deployment } = useVerificationEnvironment();
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
+  const publicClient = usePublicClient({ chainId: deployment.chainId });
   const { writeContractAsync } = useWriteContract();
-  const onSepolia = chainId === sepolia.id;
+  const onRequiredChain = chainId === deployment.chainId;
 
   const [open, setOpen] = React.useState(false);
   const [title, setTitle] = React.useState("");
@@ -138,10 +143,11 @@ function SubmitEvidenceDialog(props: {
       toast.error("Connect your wallet to submit evidence.");
       return;
     }
-    if (!onSepolia) {
-      toast.error("Switch to Sepolia.");
+    if (!onRequiredChain) {
+      toast.error(`Switch to ${deployment.chainName}.`);
       return;
     }
+    if (!publicClient) return toast.error("The selected network is unavailable.");
 
     const t = title.trim();
     const d = description.trim();
@@ -181,14 +187,22 @@ function SubmitEvidenceDialog(props: {
         filename: "evidence.json",
       });
 
-      await writeContractAsync({
-        address: props.registryAddress,
-        abi: PermanentGTCRAbi,
-        functionName: "submitEvidence",
-        args: [props.itemID as `0x${string}`, evidenceUri],
+      toast.message("Checking evidence and waiting for confirmation…");
+      await executeConfirmedTransaction({
+        simulate: async () =>
+          (
+            await publicClient.simulateContract({
+              account: address,
+              address: props.registryAddress,
+              abi: PermanentGTCRAbi,
+              functionName: "submitEvidence",
+              args: [props.itemID as `0x${string}`, evidenceUri],
+            })
+          ).request,
+        write: (request) => writeContractAsync(request),
+        wait: (hash) => publicClient.waitForTransactionReceipt({ hash }),
       });
-
-      toast.success("Evidence submitted.");
+      toast.success("Evidence confirmed.");
       setOpen(false);
       setTitle("");
       setDescription("");
@@ -230,11 +244,11 @@ function SubmitEvidenceDialog(props: {
             <Input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
           </div>
 
-          <Button className="w-full" onClick={() => void onSubmit()} disabled={submitting || !isConnected || !onSepolia}>
+          <Button className="w-full" onClick={() => void onSubmit()} disabled={submitting || !isConnected || !onRequiredChain}>
             {submitting ? "Submitting…" : "Submit"}
           </Button>
           {!isConnected ? <div className="text-xs text-muted-foreground">Connect your wallet to continue.</div> : null}
-          {isConnected && !onSepolia ? <div className="text-xs text-red-300">Wrong network. Switch to Sepolia.</div> : null}
+          {isConnected && !onRequiredChain ? <div className="text-xs text-red-300">Wrong network. Switch to {deployment.chainName}.</div> : null}
         </div>
       </DialogContent>
     </Dialog>

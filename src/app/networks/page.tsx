@@ -13,7 +13,10 @@ import {
   type AgentSubgraphNetwork,
 } from "@/lib/agent-networks";
 import { getExplorerBaseUrlByNetwork } from "@/lib/block-explorer";
-import { ESCROW_ADDRESS, REALITY_PROXY_ADDRESS, CURATE_REGISTRY_ADDRESS } from "@/lib/contracts/addresses";
+import { CURATE_REGISTRY_ADDRESS } from "@/lib/contracts/addresses";
+
+const SEPOLIA_IDENTITY_REGISTRY =
+  process.env.NEXT_PUBLIC_AGENT_REGISTRY_SEPOLIA_ADDRESS || "0x8004A818BFB912233c491871b3d84c89A494BD9e";
 
 type StatsResponse = {
   success: boolean;
@@ -81,9 +84,8 @@ export default function NetworksPage() {
 
       <section className="mb-4 rounded-xl border border-border/50 bg-card/40 p-4">
         <h2 className="mb-3 text-lg font-semibold">Kleros contracts (Sepolia)</h2>
-        <div className="grid gap-2 text-sm sm:grid-cols-3">
-          <AddressCard label="Kleros Escrow" address={ESCROW_ADDRESS} />
-          <AddressCard label="Reality Proxy" address={REALITY_PROXY_ADDRESS} />
+        <div className="grid gap-2 text-sm sm:grid-cols-2">
+          <AddressCard label="ERC-8004 Identity Registry" address={SEPOLIA_IDENTITY_REGISTRY} />
           <AddressCard label="Curate Registry" address={CURATE_REGISTRY_ADDRESS} />
         </div>
         <div className="mt-3 text-xs text-muted-foreground">
