@@ -71,6 +71,15 @@ describe("Verified Agents mainnet empty state", () => {
     );
   });
 
+  it("keeps the primary submission action prominent and correctly routed", async () => {
+    render(<VerifiedAgentsPage />);
+
+    const submitLink = await screen.findByRole("link", { name: "Submit your agent" });
+    expect(submitLink).toHaveAttribute("href", "/submit?verificationEnvironment=mainnet");
+    expect(submitLink.closest("a")).toHaveClass("bg-cyan-300");
+    expect(screen.getByText("List with refundable collateral")).toBeInTheDocument();
+  });
+
   it("explains each registry outcome in plain language", async () => {
     render(<VerifiedAgentsPage />);
     expect(await screen.findByText("Status guide")).toBeInTheDocument();

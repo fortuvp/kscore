@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Grid2X2,
   List,
+  Plus,
   Search,
   ShieldCheck,
 } from "lucide-react";
@@ -457,9 +458,19 @@ export default function VerifiedAgentsPage() {
           </ul>
         </div>
 
-        <Button asChild className="w-full sm:w-auto">
-          <Link href={withEnvironment("/submit")}>Submit Your Agent</Link>
-        </Button>
+        <div className="flex shrink-0 flex-col gap-2 sm:self-center sm:text-right">
+          <Button
+            asChild
+            size="lg"
+            className="h-11 w-full gap-2 rounded-xl bg-cyan-300 px-5 font-semibold text-[#041018] shadow-[0_10px_28px_rgba(34,211,238,0.2)] transition hover:bg-cyan-200 hover:shadow-[0_12px_34px_rgba(34,211,238,0.28)] sm:w-auto"
+          >
+            <Link href={withEnvironment("/submit")}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Submit your agent
+            </Link>
+          </Button>
+          <p className="text-center text-xs text-white/45 sm:text-right">List with refundable collateral</p>
+        </div>
       </div>
 
       <section

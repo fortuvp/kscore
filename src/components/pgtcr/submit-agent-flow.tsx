@@ -15,6 +15,14 @@ import {
 } from "@/lib/agent-networks";
 import type { Agent } from "@/types/agent";
 
+type AgentLookupResponse = {
+  success?: boolean;
+  found?: boolean;
+  network?: AgentSubgraphNetwork | null;
+  item?: Agent | null;
+  error?: string;
+};
+
 function buildAdditionalInfo(agent: Agent | null) {
   if (!agent) return null;
 
@@ -60,21 +68,38 @@ function SubmitAgentContent() {
   const [resolvedAgentId, setResolvedAgentId] = React.useState<string | null>(null);
   const [loadingAgent, setLoadingAgent] = React.useState(false);
   const [lookupError, setLookupError] = React.useState<string | null>(null);
+  const lookupAbortRef = React.useRef<AbortController | null>(null);
+  const lookupSequenceRef = React.useRef(0);
+
+  const formPrefill = React.useMemo(
+    () => ({
+      agentURI: agent?.agentURI,
+      owner: agent?.owner,
+      chainId: agent?.chainId,
+      additionalInfo: buildAdditionalInfo(agent),
+    }),
+    [agent]
+  );
 
   const selectSourceNetwork = React.useCallback((nextNetwork: AgentSubgraphNetwork) => {
+    lookupAbortRef.current?.abort();
+    lookupAbortRef.current = null;
+    lookupSequenceRef.current += 1;
+    setLoadingAgent(false);
     setNetwork(nextNetwork);
     setAgent(null);
     setResolvedAgentId(null);
     setLookupError(null);
   }, []);
 
-  const loadAgent = React.useCallback(async (candidate: string, signal?: AbortSignal) => {
+  const loadAgent = React.useCallback(async (candidate: string) => {
     if (!network) {
       setLookupError("Choose the agent network first.");
       setAgent(null);
       setResolvedAgentId(null);
       return;
     }
+    const selectedNetwork = network;
     const rawAgentId = candidate.trim();
     if (!/^\d+$/.test(rawAgentId)) {
       setLookupError("Enter a valid numeric agent number.");
@@ -83,45 +108,90 @@ function SubmitAgentContent() {
       return;
     }
     const agentId = BigInt(rawAgentId).toString();
+    const lookupSequence = lookupSequenceRef.current + 1;
+    lookupSequenceRef.current = lookupSequence;
+    lookupAbortRef.current?.abort();
+    const controller = new AbortController();
+    lookupAbortRef.current = controller;
 
     setEnteredAgentId(agentId);
     setLoadingAgent(true);
     setLookupError(null);
     try {
-      const query = new URLSearchParams({
-        agentId,
-        network,
-        fresh: "1",
-        verificationEnvironment: environment,
-      });
-      const response = await fetch(`/api/agents/by-agent-id?${query}`, {
-        cache: "no-store",
-        signal,
-      });
-      const json = await response.json();
-      if (!response.ok || !json?.success || !json?.item) {
-        throw new Error(json?.error || `Agent ${agentId} was not found on ${getAgentSubgraphLabel(network)}.`);
+      async function requestAgent(fresh: boolean) {
+        const query = new URLSearchParams({
+          agentId,
+          network: selectedNetwork,
+          verificationEnvironment: environment,
+        });
+        if (fresh) query.set("fresh", "1");
+        const response = await fetch(`/api/agents/by-agent-id?${query}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        let json: AgentLookupResponse;
+        try {
+          json = (await response.json()) as AgentLookupResponse;
+        } catch {
+          throw new Error("The agent lookup returned an invalid response.");
+        }
+        if (!response.ok || !json.success) {
+          throw new Error(json.error || "The agent lookup is temporarily unavailable.");
+        }
+        return json;
       }
-      if (signal?.aborted) return;
+
+      let json: AgentLookupResponse | null = null;
+      let firstError: Error | null = null;
+      try {
+        json = await requestAgent(true);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        firstError = error instanceof Error ? error : new Error("The first agent lookup failed.");
+      }
+      if (!json?.item) {
+        try {
+          json = await requestAgent(false);
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          throw (error instanceof Error ? error : firstError) || new Error("The live agent lookup failed.");
+        }
+      }
+      if (controller.signal.aborted || lookupSequence !== lookupSequenceRef.current) return;
+      if (!json?.item) {
+        throw new Error(`Agent ${agentId} was not found on ${getAgentSubgraphLabel(selectedNetwork)} after checking live data.`);
+      }
+      if (json.network && json.network !== selectedNetwork) {
+        throw new Error(`The lookup returned ${getAgentSubgraphLabel(json.network)} instead of ${getAgentSubgraphLabel(selectedNetwork)}.`);
+      }
       setAgent(json.item as Agent);
       setResolvedAgentId(agentId);
     } catch (error) {
-      if (signal?.aborted) return;
+      if (controller.signal.aborted || lookupSequence !== lookupSequenceRef.current) return;
       setAgent(null);
       setResolvedAgentId(null);
       setLookupError(error instanceof Error ? error.message : "Unable to load this agent.");
     } finally {
-      if (!signal?.aborted) setLoadingAgent(false);
+      if (lookupSequence === lookupSequenceRef.current) {
+        lookupAbortRef.current = null;
+        setLoadingAgent(false);
+      }
     }
   }, [environment, network]);
 
   React.useEffect(() => {
     if (!routeAgentId || !network) return;
     setEnteredAgentId(routeAgentId);
-    const controller = new AbortController();
-    void loadAgent(routeAgentId, controller.signal);
-    return () => controller.abort();
+    void loadAgent(routeAgentId);
   }, [loadAgent, network, routeAgentId]);
+
+  React.useEffect(
+    () => () => {
+      lookupSequenceRef.current += 1;
+      lookupAbortRef.current?.abort();
+    },
+    []
+  );
 
   return (
     <div className="container mx-auto max-w-4xl px-4 py-10 sm:px-6">
@@ -141,7 +211,7 @@ function SubmitAgentContent() {
       </header>
 
       <section className="py-7">
-        {lookupError ? <p className="mb-4 text-sm text-red-300">{lookupError}</p> : null}
+        {lookupError ? <p role="alert" className="mb-4 text-sm text-red-300">{lookupError}</p> : null}
         <CollateralizeAgentForm
           agentId={enteredAgentId}
           sourceNetwork={network}
@@ -150,12 +220,7 @@ function SubmitAgentContent() {
           autoFillLoading={loadingAgent}
           onAutoFill={loadAgent}
           onSourceNetworkChange={selectSourceNetwork}
-          prefill={{
-            agentURI: agent?.agentURI,
-            owner: agent?.owner,
-            chainId: agent?.chainId,
-            additionalInfo: buildAdditionalInfo(agent),
-          }}
+          prefill={formPrefill}
         />
       </section>
     </div>

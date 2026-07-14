@@ -265,6 +265,48 @@ describe("CollateralizeAgentForm", () => {
     expect(screen.getByLabelText("Owner address")).toHaveValue("");
   });
 
+  it("hydrates Auto-fill results without reloading the registry schema", async () => {
+    const emptyPrefill = {};
+    const loadedPrefill = {
+      agentURI: "ipfs://fresh-agent",
+      owner: "0x00000000000000000000000000000000000000aa",
+      chainId: 1,
+      additionalInfo: "Fresh lookup",
+    };
+    const view = render(
+      <TooltipProvider>
+        <CollateralizeAgentForm
+          agentId="1"
+          sourceNetwork="ethereum"
+          sourceChainId={1}
+          autoFilledAgentId={null}
+          autoFillLoading
+          onAutoFill={vi.fn()}
+          prefill={emptyPrefill}
+        />
+      </TooltipProvider>
+    );
+
+    expect(await screen.findByLabelText("Agent URI")).toHaveValue("");
+    view.rerender(
+      <TooltipProvider>
+        <CollateralizeAgentForm
+          agentId="1"
+          sourceNetwork="ethereum"
+          sourceChainId={1}
+          autoFilledAgentId="1"
+          autoFillLoading={false}
+          onAutoFill={vi.fn()}
+          prefill={loadedPrefill}
+        />
+      </TooltipProvider>
+    );
+
+    await waitFor(() => expect(screen.getByLabelText("Agent URI")).toHaveValue("ipfs://fresh-agent"));
+    expect(screen.getByLabelText("Owner address")).toHaveValue("0x00000000000000000000000000000000000000aa");
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).startsWith("/api/pgtcr/registry?"))).toHaveLength(1);
+  });
+
   it("keeps a confirmed approval when the submission signature is retried", async () => {
     const user = userEvent.setup();
     mocks.account.address = "0x00000000000000000000000000000000000000aa";

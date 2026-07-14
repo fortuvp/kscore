@@ -246,21 +246,6 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
         const nextColumns = (metaEvidence?.metadata?.columns || []).filter((column) => column?.label?.trim());
         setColumns(nextColumns);
         setPolicyUri(setting?.metadata?.policyURI || metaEvidence?.fileURI || null);
-
-        const prefill = props.prefill;
-        const initial: Record<string, string> = {};
-        for (const column of nextColumns) {
-          const key = normalizePgtcrColumnKey(column.label);
-          initial[key] = getPrefillTextValue(column.label, prefill);
-          if (isPgtcrAddressColumn(column)) {
-            initial[`${key}__chain`] = props.sourceChainId
-              ? String(props.sourceChainId)
-              : getPrefillChainId(prefill?.chainId);
-            initial[`${key}__address`] = prefill?.owner?.trim() || "";
-          }
-        }
-        if (nextColumns[0]) initial[normalizePgtcrColumnKey(nextColumns[0].label)] = props.agentId;
-        setValues(initial);
       } catch (error) {
         if (!cancelled) {
           setRegistry(null);
@@ -275,7 +260,25 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
     return () => {
       cancelled = true;
     };
-  }, [environment, props.agentId, props.prefill, props.sourceChainId]);
+  }, [environment]);
+
+  React.useEffect(() => {
+    if (!columns?.length) return;
+    const prefill = props.prefill;
+    const initial: Record<string, string> = {};
+    for (const column of columns) {
+      const key = normalizePgtcrColumnKey(column.label);
+      initial[key] = getPrefillTextValue(column.label, prefill);
+      if (isPgtcrAddressColumn(column)) {
+        initial[`${key}__chain`] = props.sourceChainId
+          ? String(props.sourceChainId)
+          : getPrefillChainId(prefill?.chainId);
+        initial[`${key}__address`] = prefill?.owner?.trim() || "";
+      }
+    }
+    initial[normalizePgtcrColumnKey(columns[0].label)] = props.agentId;
+    setValues((previous) => ({ ...initial, __deposit: previous.__deposit || "" }));
+  }, [columns, props.agentId, props.prefill, props.sourceChainId]);
 
   const depositInput = values.__deposit ?? "";
   const depositResult = React.useMemo(

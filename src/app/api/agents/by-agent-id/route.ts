@@ -124,7 +124,7 @@ export async function GET(req: Request) {
       );
     }
 
-    const [resolved, curateFallback] = await Promise.all([
+    const [resolved, curateFallback, sepoliaFallback] = await Promise.all([
       resolveAgentByAgentId(agentIdParam, requestedNetwork, fresh),
       withTimeout(
         getCurateFallbackAgentByAgentId(agentIdParam, requestedNetwork, 10, {
@@ -134,6 +134,13 @@ export async function GET(req: Request) {
         fresh ? SUBGRAPH_LOOKUP_TIMEOUT_MS : FAST_LOOKUP_TIMEOUT_MS,
         null
       ),
+      requestedNetwork && requestedNetwork !== "sepolia"
+        ? Promise.resolve(null)
+        : withTimeout(
+            getSepoliaIdentityRegistryFallbackAgentByAgentId(agentIdParam, { skipChainRefresh: !fresh }),
+            fresh ? SUBGRAPH_LOOKUP_TIMEOUT_MS : FAST_LOOKUP_TIMEOUT_MS,
+            null
+          ),
     ]);
 
     const curateHasBetterFeedback =
@@ -177,15 +184,6 @@ export async function GET(req: Request) {
         verificationChainId,
       });
     }
-
-    const sepoliaFallback =
-      requestedNetwork && requestedNetwork !== "sepolia"
-        ? null
-        : await withTimeout(
-            getSepoliaIdentityRegistryFallbackAgentByAgentId(agentIdParam, { skipChainRefresh: !fresh }),
-            fresh ? SUBGRAPH_LOOKUP_TIMEOUT_MS : FAST_LOOKUP_TIMEOUT_MS,
-            null
-          );
 
     if (sepoliaFallback) {
       return NextResponse.json({
