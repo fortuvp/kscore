@@ -114,6 +114,7 @@ async function walkFiles(directory, prefix = "") {
 
 const expected = new Map();
 const skillMetadata = [];
+const skillDocuments = [];
 
 for (const name of skillNames) {
   const sourceDirectory = resolve(root, "skills", name);
@@ -141,6 +142,13 @@ for (const name of skillNames) {
     skillUrl: `${siteUrl}/skills/${name}/SKILL.md`,
     url: `${siteUrl}/skills/${name}.tar.gz`,
     digest: `sha256:${sha256(archive)}`,
+  });
+  skillDocuments.push({
+    displayName:
+      name === "verified-agents-sepolia"
+        ? "Verified Agents · Sepolia"
+        : "Verified Agents · Mainnet",
+    text: skillText,
   });
 }
 
@@ -215,6 +223,24 @@ Ethereum mainnet registry (chain 1): 0x118155741eea23f56b3bd59b0c1342d5daaa6d07
 Discovery index: ${siteUrl}/.well-known/agent-skills/index.json
 `;
 
+const llmsFullText = `${llmsText}
+---
+
+# Complete local skill router
+
+${publicSkill}
+
+${skillDocuments
+  .map(
+    (skill) => `---
+
+# ${skill.displayName} overlay
+
+${skill.text}`,
+  )
+  .join("\n\n")}
+`;
+
 const discoveryIndex = `${JSON.stringify(
   {
     $schema: "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
@@ -232,6 +258,7 @@ const discoveryIndex = `${JSON.stringify(
 
 expected.set("SKILL.md", Buffer.from(publicSkill));
 expected.set("llms.txt", Buffer.from(llmsText));
+expected.set("llms-full.txt", Buffer.from(llmsFullText));
 expected.set(
   ".well-known/agent-skills/index.json",
   Buffer.from(discoveryIndex),

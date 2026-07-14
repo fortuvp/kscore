@@ -31,22 +31,15 @@ describe("Navbar", () => {
     ).toBe(true);
   });
 
-  it("links to the Kleros skills package and its source from both navigation layouts", () => {
+  it("keeps Skills local and removes the mistaken Source code navigation item", () => {
     render(<Navbar />);
 
     expect(
       screen
         .getAllByRole("link", { name: "Skills" })
-        .every((link) => link.getAttribute("href") === "https://skills.kleros.io/" && link.getAttribute("target") === "_blank")
+        .every((link) => link.getAttribute("href") === "/skills" && link.getAttribute("target") === null)
     ).toBe(true);
-    expect(
-      screen
-        .getAllByRole("link", { name: "Source code" })
-        .every(
-          (link) =>
-            link.getAttribute("href") === "https://github.com/kleros/kleros-skills" &&
-            link.getAttribute("target") === "_blank"
-        )
-    ).toBe(true);
+    expect(screen.queryByRole("link", { name: "Source code" })).not.toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Primary navigation" })).toBeInTheDocument();
   });
 });

@@ -21,14 +21,18 @@ describe("requested UI copy and navigation", () => {
     expect(source("src/app/page.tsx")).toContain("Registry + Curate timeline");
   });
 
-  it("publishes a professional guide and FAQ with precise pGTCR status language", () => {
+  it("publishes a documentation-style guide and local agent skills page", () => {
     const docs = source("src/app/docs/page.tsx");
     const faq = source("src/app/faq/page.tsx");
+    const skills = source("src/app/skills/page.tsx");
+    const skillsGuide = source("src/components/agent-skills-guide.tsx");
 
-    expect(docs).toContain("Sign two transactions");
-    expect(docs).toContain("pGTCR, not an allowlist");
-    expect(docs).toContain("https://skills.kleros.io/");
-    expect(docs).toContain("https://github.com/kleros/kleros-skills");
+    expect(docs).toContain("Signing sequence");
+    expect(docs).toContain("A scoped signal—not a universal endorsement");
+    expect(docs).toContain('href="/skills"');
+    expect(skills).toContain("Guide &amp; Skills");
+    expect(skillsGuide).toContain("Read ${entryUrl} and follow it before interacting with DEX8004.");
+    expect(skillsGuide).toContain("/llms-full.txt");
     expect(faq).toContain("Removed means a successful challenge and dispute");
     expect(faq).toContain("unchallenged voluntary withdrawal returns the locked stake");
     expect(faq).toContain("challenging is not guaranteed profit");
@@ -38,5 +42,8 @@ describe("requested UI copy and navigation", () => {
     const layout = source("src/app/layout.tsx");
     expect(layout).toContain('href="#main-content"');
     expect(layout).toContain('id="main-content"');
+    expect(layout).toContain('href="/llms.txt"');
+    expect(layout).toContain('href="/llms-full.txt"');
+    expect(layout).toContain('rel="agent-skill"');
   });
 });

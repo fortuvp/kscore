@@ -6,7 +6,6 @@ import {
   Bot,
   ChevronDown,
   CircleDollarSign,
-  ExternalLink,
   FileText,
   Gavel,
   HelpCircle,
@@ -232,15 +231,13 @@ export default function FaqPage() {
             <p className="mt-3 text-sm leading-6 text-white/52">
               Install the full Kleros Skills package before preparing or signing registry operations.
             </p>
-            <a
-              href="https://skills.kleros.io/"
-              target="_blank"
-              rel="noreferrer"
+            <Link
+              href="/skills"
               className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 transition hover:text-cyan-100 hover:underline hover:underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/45"
             >
-              Browse Kleros Skills
-              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-            </a>
+              Open Guide &amp; Skills
+              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </Link>
           </section>
         </div>
       </main>

@@ -33,6 +33,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
+      <head>
+        <meta name="llms" content="/llms.txt" />
+        <link rel="alternate" type="text/markdown" href="/llms.txt" title="DEX8004 LLM index" />
+        <link rel="alternate" type="text/markdown" href="/llms-full.txt" title="DEX8004 complete agent guide" />
+        <link rel="agent-skill" type="text/markdown" href="/SKILL.md" title="DEX8004 agent skill" />
+      </head>
       <body
         className={`${appSans.variable} ${geistMono.variable} antialiased`}
       >

@@ -37,8 +37,7 @@ const GROUPS = [
     links: [
       { href: "/docs", label: "Guide" },
       { href: "/faq", label: "FAQ" },
-      { href: "https://skills.kleros.io/", label: "Kleros Skills", external: true },
-      { href: "https://github.com/kleros/kleros-skills", label: "Source code", external: true },
+      { href: "/skills", label: "Skills" },
     ],
   },
 ] as const;
@@ -120,6 +119,12 @@ export function AppFooter() {
               className="rounded-md border border-white/10 bg-white/[0.025] px-2 py-1 font-mono text-[11px] text-white/52 transition hover:border-cyan-300/22 hover:text-cyan-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/45"
             >
               SKILL.md
+            </Link>
+            <Link
+              href="/llms-full.txt"
+              className="rounded-md border border-white/10 bg-white/[0.025] px-2 py-1 font-mono text-[11px] text-white/52 transition hover:border-cyan-300/22 hover:text-cyan-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/45"
+            >
+              llms-full.txt
             </Link>
           </div>
         </div>
