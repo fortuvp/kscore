@@ -536,7 +536,19 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
             </UiBadge>
           ) : null}
         </div>
-        <div className="grid grid-cols-[8.5rem_minmax(0,1fr)] gap-2 sm:grid-cols-[10rem_minmax(0,1fr)_auto]">
+        <div className="grid grid-cols-[6.5rem_7rem_minmax(0,1fr)] gap-2 sm:grid-cols-[7rem_10rem_minmax(0,1fr)]">
+          {props.onAutoFill ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void props.onAutoFill?.(draftAgentId.trim())}
+              disabled={props.autoFillLoading || !props.sourceNetwork || !/^\d+$/.test(draftAgentId.trim())}
+              className="w-full min-w-0 px-2"
+            >
+              <WandSparkles className={`mr-1.5 h-4 w-4 shrink-0 ${props.autoFillLoading ? "animate-pulse" : ""}`} />
+              {props.autoFillLoading ? "Loading" : "Auto-fill"}
+            </Button>
+          ) : null}
           <Select
             value={props.sourceNetwork || undefined}
             onValueChange={(value) => props.onSourceNetworkChange?.(value as AgentSubgraphNetwork)}
@@ -560,18 +572,6 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
             onChange={(event) => setDraftAgentId(event.target.value)}
             className={`${FORM_CONTROL_CLASS} min-w-0 font-mono`}
           />
-          {props.onAutoFill ? (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void props.onAutoFill?.(draftAgentId.trim())}
-              disabled={props.autoFillLoading || !props.sourceNetwork || !/^\d+$/.test(draftAgentId.trim())}
-              className="col-span-2 min-w-28 sm:col-span-1"
-            >
-              <WandSparkles className={`mr-2 h-4 w-4 ${props.autoFillLoading ? "animate-pulse" : ""}`} />
-              {props.autoFillLoading ? "Loading" : "Auto-fill"}
-            </Button>
-          ) : null}
         </div>
       </div>
 

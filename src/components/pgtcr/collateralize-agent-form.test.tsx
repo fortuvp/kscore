@@ -174,7 +174,11 @@ describe("CollateralizeAgentForm", () => {
     expect(screen.getByText(/Network gas is not refunded/)).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /I have read the registry policy/i })).not.toBeChecked();
     expect(screen.getByText(/Make sure your submission complies with the listing criteria/i)).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Agent network" }).compareDocumentPosition(screen.getByLabelText("Agent number")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const autoFillButton = screen.getByRole("button", { name: "Auto-fill" });
+    const networkSelector = screen.getByRole("combobox", { name: "Agent network" });
+    const agentNumberInput = screen.getByLabelText("Agent number");
+    expect(autoFillButton.compareDocumentPosition(networkSelector) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(networkSelector.compareDocumentPosition(agentNumberInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getAllByRole("combobox")).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "How to boost" }));
     expect(screen.getByText("Stake more. Rank higher.")).toBeInTheDocument();
