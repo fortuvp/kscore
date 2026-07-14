@@ -75,9 +75,11 @@ describe("Verified Agents mainnet empty state", () => {
     render(<VerifiedAgentsPage />);
 
     const submitLink = await screen.findByRole("link", { name: "Submit your agent" });
+    const resultsCount = screen.getByText((_content, element) => element?.getAttribute("aria-live") === "polite");
     expect(submitLink).toHaveAttribute("href", "/submit?verificationEnvironment=mainnet");
     expect(submitLink.closest("a")).toHaveClass("bg-cyan-300");
-    expect(screen.getByText("List with refundable collateral")).toBeInTheDocument();
+    expect(submitLink.compareDocumentPosition(resultsCount) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText("List with refundable collateral")).not.toBeInTheDocument();
   });
 
   it("explains each registry outcome in plain language", async () => {

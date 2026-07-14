@@ -443,7 +443,7 @@ export default function VerifiedAgentsPage() {
 
   return (
     <div className="container mx-auto max-w-[1280px] overflow-x-hidden px-4 py-10 sm:px-6 sm:py-12">
-      <div className="mb-8 flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+      <div className="mb-8">
         <div className="max-w-2xl">
           <div className="flex items-center gap-2">
             <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-300/20 bg-emerald-300/10 shadow-[0_0_24px_rgba(16,185,129,0.12)]">
@@ -458,19 +458,6 @@ export default function VerifiedAgentsPage() {
           </ul>
         </div>
 
-        <div className="flex shrink-0 flex-col gap-2 sm:self-center sm:text-right">
-          <Button
-            asChild
-            size="lg"
-            className="h-11 w-full gap-2 rounded-xl bg-cyan-300 px-5 font-semibold text-[#041018] shadow-[0_10px_28px_rgba(34,211,238,0.2)] transition hover:bg-cyan-200 hover:shadow-[0_12px_34px_rgba(34,211,238,0.28)] sm:w-auto"
-          >
-            <Link href={withEnvironment("/submit")}>
-              <Plus className="h-4 w-4" aria-hidden="true" />
-              Submit your agent
-            </Link>
-          </Button>
-          <p className="text-center text-xs text-white/45 sm:text-right">List with refundable collateral</p>
-        </div>
       </div>
 
       <section
@@ -565,8 +552,20 @@ export default function VerifiedAgentsPage() {
       </aside>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <div className="text-sm text-muted-foreground" aria-live="polite">
-          Showing <span className="font-medium text-white/85">{derived.length}</span> {derived.length === 1 ? "agent" : "agents"} · Page {page + 1}
+        <div className="flex items-center gap-3">
+          <Button
+            asChild
+            size="sm"
+            className="h-9 shrink-0 gap-1.5 rounded-lg bg-cyan-300 px-3.5 font-semibold text-[#041018] shadow-[0_8px_22px_rgba(34,211,238,0.16)] transition hover:bg-cyan-200 hover:shadow-[0_10px_26px_rgba(34,211,238,0.23)]"
+          >
+            <Link href={withEnvironment("/submit")}>
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              Submit your agent
+            </Link>
+          </Button>
+          <div className="text-sm text-muted-foreground" aria-live="polite">
+            Showing <span className="font-medium text-white/85">{derived.length}</span> {derived.length === 1 ? "agent" : "agents"} · Page {page + 1}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Button
