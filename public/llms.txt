@@ -1,8 +1,31 @@
-# DEX8004 Verified Agents skills
+# DEX8004 Verified Agents
 
-> Registry-specific, submission-first instructions for the Verified Agents Stake Curate / PermanentGTCR / PGTCR registries.
+> Agent-readable routing and safety overlay for two permissionless, policy-governed Stake Curate / PermanentGTCR / PGTCR registries.
 
-- [Verified Agents · Sepolia](http://localhost:3000/skills/verified-agents-sepolia/SKILL.md): Submit ERC-8004 agents to, inspect, challenge, appeal, provide evidence for, or withdraw from the Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum Sepolia. Use for testnet Verified Agents registry operations, submission drafting, duplicate checks, policy and schema validation, live stake or arbitration-cost reads, and PGTCR dispute lifecycle work at registry 0x3162df9669affa8b6b6ff2147afa052249f00447. Installable bundle: http://localhost:3000/skills/verified-agents-sepolia.tar.gz
-- [Verified Agents · Mainnet](http://localhost:3000/skills/verified-agents-mainnet/SKILL.md): Submit ERC-8004 agents to, inspect, challenge, appeal, provide evidence for, or withdraw from the Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum mainnet. Use for production Verified Agents registry operations, submission drafting, duplicate checks, policy and schema validation, live stake or arbitration-cost reads, and PGTCR dispute lifecycle work at registry 0x118155741eea23f56b3bd59b0c1342d5daaa6d07. Installable bundle: http://localhost:3000/skills/verified-agents-mainnet.tar.gz
+## Load Kleros Skills first
+
+Install or load the complete current Kleros Skills package before any registry operation:
+
+- Package and agent router: https://skills.kleros.io/
+- Source: https://github.com/kleros/kleros-skills
+- Curate operations: https://github.com/kleros/kleros-skills/blob/master/kleros-curate/SKILL.md
+- Stake Curate operations: https://github.com/kleros/kleros-skills/blob/master/kleros-curate/references/stake-curate.md
+
+Use the upstream package for operational Kleros mechanics. Use the DEX8004 skills below as the fixed-registry overlay for addresses, ERC-8004 source identity, duplicate prevention, status language, economics, and policy safeguards. This mirrors the context-overlay pattern of https://github.com/kleros/kleros-skills/blob/master/kleros-curate/references/scout-registries.md, but Verified Agents is PGTCR—not Scout or Light Curate.
+
+## Registry skills
+
+- [Verified Agents · Sepolia](http://localhost:3000/skills/verified-agents-sepolia/SKILL.md): Operate the permissionless Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum Sepolia for ERC-8004 submissions, inspection, challenges, evidence, appeals, and withdrawals. Always load the complete current Kleros Skills package for live PGTCR mechanics; use this overlay for fixed routing, source identity, policy checks, state labels, economics, and duplicate safeguards at 0x3162df9669affa8b6b6ff2147afa052249f00447. Installable bundle: http://localhost:3000/skills/verified-agents-sepolia.tar.gz
+- [Verified Agents · Mainnet](http://localhost:3000/skills/verified-agents-mainnet/SKILL.md): Operate the permissionless Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum mainnet for ERC-8004 submissions, inspection, challenges, evidence, appeals, and withdrawals. Always load the complete current Kleros Skills package for live PGTCR mechanics; use this overlay for fixed routing, source identity, policy checks, state labels, economics, and duplicate safeguards at 0x118155741eea23f56b3bd59b0c1342d5daaa6d07. Installable bundle: http://localhost:3000/skills/verified-agents-mainnet.tar.gz
+
+Sepolia registry (chain 11155111): 0x3162df9669affa8b6b6ff2147afa052249f00447
+Ethereum mainnet registry (chain 1): 0x118155741eea23f56b3bd59b0c1342d5daaa6d07
+
+## Product semantics and economics
+
+- Pending is not verified. Active/verified means currently collateralized and compliant with this registry's policy only. Disputed is unresolved. Removed follows an adverse dispute. Withdrawn is voluntary and is not evidence of non-compliance.
+- Stake above the live minimum may improve stake-ranked placement and signal confidence, but never proves compliance or guarantees clients.
+- Correct challengers may earn collateral; incorrect challengers can lose stake and incur fees. Read every amount and rule live.
+- After the live waiting period, a successfully finalized voluntary withdrawal returns 100% of the recorded ERC20 item stake and recorded native arbitration deposit. Gas/upload costs are excluded; disputes put recovery at risk.
 
 Discovery index: http://localhost:3000/.well-known/agent-skills/index.json

@@ -13,6 +13,7 @@ import {
   Search,
   ShieldAlert,
   ShieldCheck,
+  Trophy,
 } from "lucide-react";
 import { formatUnits } from "viem";
 import { Badge } from "@/components/ui/badge";
@@ -118,6 +119,14 @@ function formatStake(raw: string | undefined, decimals = 18) {
     return value.toLocaleString(undefined, { maximumFractionDigits: 4 });
   } catch {
     return "0";
+  }
+}
+
+function parseStake(raw: string | undefined) {
+  try {
+    return BigInt(raw || "0");
+  } catch {
+    return 0n;
   }
 }
 
@@ -303,14 +312,27 @@ export default function ExplorePage() {
         return (Number(b.verifiedAt) || 0) - (Number(a.verifiedAt) || 0);
       }
 
-      const stakeA = BigInt(a.stake || "0");
-      const stakeB = BigInt(b.stake || "0");
+      const stakeA = parseStake(a.stake);
+      const stakeB = parseStake(b.stake);
       if (stakeA === stakeB) return (Number(b.verifiedAt) || 0) - (Number(a.verifiedAt) || 0);
       return stakeA > stakeB ? -1 : 1;
     });
 
     return rows;
   }, [highlights?.verifiedAgents, verifiedFilter]);
+
+  const mostStakedKey = React.useMemo(() => {
+    let winner = "";
+    let largestStake = -1n;
+    for (const item of highlights?.verifiedAgents || []) {
+      const stake = parseStake(item.stake);
+      if (stake > largestStake) {
+        largestStake = stake;
+        winner = `${item.network}:${item.id}`;
+      }
+    }
+    return winner;
+  }, [highlights?.verifiedAgents]);
 
   return (
     <div className="relative overflow-hidden">
@@ -327,113 +349,155 @@ export default function ExplorePage() {
         </section>
 
         <>
-          <section className="grid gap-4 lg:grid-cols-2">
-              <div className="min-w-0 overflow-hidden rounded-xl border border-white/15 bg-black/30 p-4">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="h-4 w-4 text-emerald-300" />
-                    <h2 className="text-lg font-semibold text-white">Verified agents (Curate)</h2>
+          <section className="grid items-stretch gap-5 lg:grid-cols-[minmax(0,3.25fr)_minmax(16rem,1fr)]">
+            <div className="relative min-w-0 overflow-hidden rounded-2xl border border-emerald-300/25 bg-[linear-gradient(145deg,rgba(16,185,129,0.11),rgba(6,182,212,0.055)_48%,rgba(0,0,0,0.28))] p-4 shadow-[0_24px_70px_rgba(0,0,0,0.28),0_0_40px_rgba(16,185,129,0.07)] sm:p-5">
+              <div className="pointer-events-none absolute -right-24 -top-24 h-56 w-56 rounded-full bg-emerald-300/8 blur-3xl" />
+
+              <div className="relative mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                <div className="flex min-w-0 items-start gap-3">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-emerald-300/25 bg-emerald-300/12 shadow-[0_0_24px_rgba(16,185,129,0.13)]">
+                    <ShieldCheck className="h-5 w-5 text-emerald-200" />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200/65">Collateral leaderboard</div>
+                    <h2 className="mt-1 text-xl font-semibold tracking-tight text-white">Verified agents (Curate)</h2>
+                    <p className="mt-1 text-xs leading-relaxed text-white/55">Policy-compliant agents, ranked by collateralized stake.</p>
                   </div>
-                  <div className="flex items-center gap-2">
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="inline-flex rounded-lg border border-white/10 bg-black/25 p-1" role="group" aria-label="Sort verified agents">
                     <button
                       type="button"
+                      aria-pressed={verifiedFilter === "highestStake"}
                       onClick={() => setVerifiedFilter("highestStake")}
-                      className={`rounded-full border px-2.5 py-1 text-[11px] transition ${
+                      className={`rounded-md px-2.5 py-1.5 text-[11px] font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-emerald-300/40 ${
                         verifiedFilter === "highestStake"
-                          ? "border-emerald-300/45 bg-emerald-300/15 text-emerald-100"
-                          : "border-white/20 bg-white/5 text-white/70 hover:text-white"
+                          ? "bg-emerald-300/18 text-emerald-100 shadow-sm"
+                          : "text-white/55 hover:bg-white/5 hover:text-white"
                       }`}
                     >
                       Highest stake
                     </button>
                     <button
                       type="button"
+                      aria-pressed={verifiedFilter === "latest"}
                       onClick={() => setVerifiedFilter("latest")}
-                      className={`rounded-full border px-2.5 py-1 text-[11px] transition ${
+                      className={`rounded-md px-2.5 py-1.5 text-[11px] font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-emerald-300/40 ${
                         verifiedFilter === "latest"
-                          ? "border-emerald-300/45 bg-emerald-300/15 text-emerald-100"
-                          : "border-white/20 bg-white/5 text-white/70 hover:text-white"
+                          ? "bg-emerald-300/18 text-emerald-100 shadow-sm"
+                          : "text-white/55 hover:bg-white/5 hover:text-white"
                       }`}
                     >
                       Latest
                     </button>
-                    <Link href={withEnvironment("/verified")} className="text-xs text-cyan-200/80 hover:text-cyan-200 underline underline-offset-4">
-                      View All
-                    </Link>
                   </div>
-                </div>
-                <div className="min-h-[13.5rem] max-h-[13.5rem] space-y-2 overflow-x-hidden overflow-y-auto pr-1">
-                  {loading && !highlights ? (
-                    <div className="flex h-full min-h-[13.5rem] items-center justify-center text-xs text-white/65">
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Loading verified agents...
-                    </div>
-                  ) : visibleVerifiedAgents.length > 0 ? (
-                    visibleVerifiedAgents.map((item, index) => {
-                      const href = item.curateItemUrl || withEnvironment(`/agents/${encodeURIComponent(item.id)}?network=${item.network}`);
-                      const external = Boolean(item.curateItemUrl);
-                      const verifiedAt = Number(item.verifiedAt || 0);
-                      const topStake = verifiedFilter === "highestStake" && index === 0;
-                      const podiumStake = verifiedFilter === "highestStake" && index < 3;
-                      const stakeValue = formatStake(item.stake, Number(highlights?.verifiedStakeDecimals || 18));
-                      return (
-                        <Link
-                          key={`${item.network}:${item.id}`}
-                          href={href}
-                          target={external ? "_blank" : undefined}
-                          rel={external ? "noreferrer" : undefined}
-                          className={`block h-[66px] min-w-0 rounded-md border px-2.5 py-1.5 text-xs text-white/85 transition ${
-                            topStake
-                              ? "border-emerald-300/45 bg-gradient-to-r from-emerald-500/18 to-cyan-500/12 shadow-[0_0_0_1px_rgba(110,231,183,0.08),0_0_18px_rgba(16,185,129,0.22)]"
-                              : podiumStake
-                                ? "border-emerald-500/28 bg-emerald-500/10 shadow-[0_0_0_1px_rgba(110,231,183,0.04),0_0_12px_rgba(16,185,129,0.1)]"
-                                : "border-emerald-500/20 bg-emerald-500/8 shadow-[0_0_0_1px_rgba(110,231,183,0.03),0_0_10px_rgba(16,185,129,0.08)] hover:border-emerald-500/40 hover:shadow-[0_0_0_1px_rgba(110,231,183,0.08),0_0_14px_rgba(16,185,129,0.12)]"
-                          }`}
-                        >
-                          <div className="flex h-full min-w-0 flex-col justify-between">
-                            <div className="flex min-w-0 items-start justify-between gap-2">
-                              <div className="min-w-0 truncate text-sm font-medium">
-                                {item.name} <span className="text-[10px] text-white/45">#{item.agentId}</span>
-                              </div>
-                              {podiumStake ? (
-                                <Badge className="shrink-0 border-emerald-300/40 bg-emerald-300/18 px-1.5 py-0 text-[10px] text-emerald-100">
-                                  #{index + 1}
-                                </Badge>
-                              ) : null}
-                            </div>
-                            <div className="flex min-w-0 items-center justify-between gap-2 text-[10px]">
-                              <span className="truncate rounded-full border border-emerald-300/40 bg-emerald-300/16 px-1.5 py-0.5 font-semibold text-emerald-100">
-                                Stake {stakeValue} {highlights?.verifiedStakeSymbol || "TOKEN"}
-                              </span>
-                              <span className="shrink-0 text-white/55">{verifiedAt > 0 ? formatAgo(verifiedAt) : "-"}</span>
-                            </div>
-                          </div>
-                        </Link>
-                      );
-                    })
-                  ) : (
-                    <div className="flex h-full min-h-[13.5rem] items-center justify-center px-5 text-center text-xs text-white/65">
-                      {environment === "mainnet"
-                        ? "No verified agents have been submitted to the Ethereum registry yet."
-                        : "Verified agents are temporarily unavailable."}
-                    </div>
-                  )}
+                  <Link
+                    href={withEnvironment("/verified")}
+                    className="inline-flex h-9 items-center rounded-lg border border-cyan-300/20 bg-cyan-300/8 px-3 text-xs font-medium text-cyan-100 outline-none transition hover:border-cyan-300/35 hover:bg-cyan-300/12 focus-visible:ring-2 focus-visible:ring-cyan-300/40"
+                  >
+                    View all agents
+                    <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                  </Link>
                 </div>
               </div>
 
-              <div className="min-w-0 overflow-hidden rounded-xl border border-white/15 bg-black/30 p-4">
-                <div className="mb-3 flex flex-wrap items-center gap-2">
-                  <ShieldAlert className="h-4 w-4 text-amber-300" />
-                  <h2 className="text-lg font-semibold text-white">Moderation</h2>
-                  <Badge className="ml-auto border-amber-400/30 bg-amber-400/10 text-amber-200">Coming soon</Badge>
-                </div>
-                <div className="flex min-h-[13.5rem] flex-col items-center justify-center px-5 text-center">
-                  <ShieldAlert className="h-8 w-8 text-amber-200/80" />
-                  <p className="mt-4 max-w-sm text-sm text-white/70">
-                    Community reports and arbitration controls will appear here when moderation launches.
-                  </p>
-                </div>
+              <div className="relative min-h-[18rem] max-h-[23rem] overflow-x-hidden overflow-y-auto pr-1 [scrollbar-color:rgba(110,231,183,0.28)_transparent]">
+                {loading && !highlights ? (
+                  <div className="flex min-h-[18rem] items-center justify-center text-sm text-white/60">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Loading verified agents…
+                  </div>
+                ) : visibleVerifiedAgents.length > 0 ? (
+                  <ol className="space-y-2.5">
+                    {visibleVerifiedAgents.map((item, index) => {
+                      const itemKey = `${item.network}:${item.id}`;
+                      const href = item.curateItemUrl || withEnvironment(`/agents/${encodeURIComponent(item.id)}?network=${item.network}`);
+                      const external = Boolean(item.curateItemUrl);
+                      const verifiedAt = Number(item.verifiedAt || 0);
+                      const isMostStaked = itemKey === mostStakedKey;
+                      const stakeValue = formatStake(item.stake, Number(highlights?.verifiedStakeDecimals || 18));
+                      return (
+                        <li key={itemKey}>
+                          <Link
+                            href={href}
+                            target={external ? "_blank" : undefined}
+                            rel={external ? "noreferrer" : undefined}
+                            className={`grid min-h-[4.75rem] min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 rounded-xl border px-3 py-2.5 text-white/85 outline-none transition duration-200 focus-visible:ring-2 focus-visible:ring-emerald-300/45 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:px-4 ${
+                              isMostStaked
+                                ? "border-emerald-300/45 bg-[linear-gradient(100deg,rgba(16,185,129,0.2),rgba(6,182,212,0.09))] shadow-[0_0_0_1px_rgba(110,231,183,0.07),0_10px_28px_rgba(16,185,129,0.14)]"
+                                : "border-white/9 bg-black/20 hover:-translate-y-px hover:border-emerald-300/25 hover:bg-emerald-300/[0.06]"
+                            }`}
+                          >
+                            <span
+                              className={`row-span-2 flex h-9 w-9 items-center justify-center self-center rounded-lg border text-xs font-semibold tabular-nums ${
+                                isMostStaked
+                                  ? "border-emerald-200/35 bg-emerald-200/16 text-emerald-100"
+                                  : "border-white/10 bg-white/[0.04] text-white/45"
+                              }`}
+                              aria-label={isMostStaked ? "Most staked agent" : `Rank ${index + 1}`}
+                            >
+                              {isMostStaked ? <Trophy className="h-4 w-4" /> : index + 1}
+                            </span>
+
+                            <div className="min-w-0 self-end sm:self-center">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <span className="truncate text-sm font-semibold sm:text-base">{item.name}</span>
+                                {isMostStaked ? (
+                                  <Badge className="shrink-0 border-emerald-200/30 bg-emerald-200/12 px-1.5 py-0 text-[9px] font-semibold uppercase tracking-wide text-emerald-100">
+                                    Most staked
+                                  </Badge>
+                                ) : null}
+                              </div>
+                              <div className="mt-1 truncate text-[11px] text-white/45">
+                                Agent #{item.agentId} · {getAgentSubgraphLabel(item.network)}
+                              </div>
+                            </div>
+
+                            <div className="col-start-2 flex min-w-0 items-end justify-between gap-3 self-start sm:col-start-3 sm:row-span-2 sm:row-start-1 sm:flex-col sm:items-end sm:justify-center sm:self-center sm:text-right">
+                              <div>
+                                <div className="text-[9px] font-semibold uppercase tracking-[0.13em] text-emerald-200/55">Collateralized stake</div>
+                                <div className="mt-0.5 whitespace-nowrap text-sm font-bold tabular-nums text-emerald-100 sm:text-base">
+                                  {stakeValue} <span className="text-[11px] font-semibold text-emerald-200/60">{highlights?.verifiedStakeSymbol || "TOKEN"}</span>
+                                </div>
+                              </div>
+                              <span className="shrink-0 text-[10px] text-white/38">{verifiedAt > 0 ? `Verified ${formatAgo(verifiedAt)}` : "Verified"}</span>
+                            </div>
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                ) : (
+                  <div className="flex min-h-[18rem] items-center justify-center px-5 text-center text-sm text-white/55">
+                    {environment === "mainnet"
+                      ? "No verified agents have been submitted to the Ethereum registry yet."
+                      : "Verified agents are temporarily unavailable."}
+                  </div>
+                )}
               </div>
+            </div>
+
+            <div className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-amber-200/12 bg-[linear-gradient(160deg,rgba(245,158,11,0.065),rgba(0,0,0,0.25)_52%)] p-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-amber-200/15 bg-amber-300/8">
+                  <ShieldAlert className="h-4 w-4 text-amber-200/80" />
+                </span>
+                <div>
+                  <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-amber-200/45">Community layer</div>
+                  <h2 className="text-base font-semibold text-white">Moderation</h2>
+                </div>
+                <Badge className="ml-auto border-amber-300/20 bg-amber-300/8 text-[10px] text-amber-100/75">Coming soon</Badge>
+              </div>
+              <div className="flex flex-1 flex-col items-center justify-center px-2 py-10 text-center">
+                <span className="flex h-14 w-14 items-center justify-center rounded-2xl border border-amber-200/10 bg-amber-300/[0.045]">
+                  <ShieldAlert className="h-6 w-6 text-amber-200/55" />
+                </span>
+                <p className="mt-5 max-w-[15rem] text-sm leading-relaxed text-white/55">
+                  Community reports and arbitration controls will appear here when moderation launches.
+                </p>
+              </div>
+            </div>
           </section>
 
           <section className="mt-10 sm:mt-12">

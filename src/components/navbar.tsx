@@ -7,18 +7,31 @@ import { ConnectButton } from "@/components/web3/connect-button";
 import { useVerificationEnvironment } from "@/components/verification-environment-provider";
 import type { VerificationEnvironment } from "@/lib/verification-environment";
 
-const DESKTOP_NAV_LINKS = [
-  { href: "/explore", label: "Explore" },
-  { href: "/verified", label: "Verified Agents" },
-  { href: "/launch", label: "Build Your Standard" },
-] as const;
+const KLEROS_SKILLS_URL = "https://skills.kleros.io/";
+const KLEROS_SKILLS_SOURCE_URL = "https://github.com/kleros/kleros-skills";
 
-const MOBILE_NAV_LINKS = [
+type NavItem = {
+  href: string;
+  label: string;
+  external?: boolean;
+};
+
+const DESKTOP_NAV_LINKS: readonly NavItem[] = [
+  { href: "/explore", label: "Explore" },
+  { href: "/verified", label: "Verified Agents" },
+  { href: "/launch", label: "Build Your Standard" },
+  { href: KLEROS_SKILLS_URL, label: "Skills", external: true },
+  { href: KLEROS_SKILLS_SOURCE_URL, label: "Source code", external: true },
+];
+
+const MOBILE_NAV_LINKS: readonly NavItem[] = [
   { href: "/explore", label: "Explore" },
   { href: "/launch", label: "Build Your Standard" },
   { href: "/verified", label: "Verified Agents" },
+  { href: KLEROS_SKILLS_URL, label: "Skills", external: true },
+  { href: KLEROS_SKILLS_SOURCE_URL, label: "Source code", external: true },
   { href: "/moderation", label: "Moderate (Soon)" },
-] as const;
+];
 
 const VERIFICATION_AWARE_NAV_PATHS = new Set(["/explore", "/verified"]);
 
@@ -28,18 +41,19 @@ export function Navbar() {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-white/10 bg-[#07070d]/85 backdrop-blur-xl">
-      <div className="relative hidden h-14 w-full items-center px-4 lg:flex sm:px-6">
+      <div className="hidden h-14 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center px-4 sm:px-6 lg:grid">
         <Link href={withEnvironment("/")} className="flex items-center font-semibold tracking-tight">
           <span className="bg-gradient-to-r from-cyan-300 to-cyan-400 bg-clip-text text-lg text-transparent">DEX</span>
           <span className="text-lg text-white/90">8004</span>
         </Link>
 
-        <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-1">
+        <nav className="flex min-w-0 items-center justify-center gap-0.5">
           {DESKTOP_NAV_LINKS.map((link) => (
             <NavLink
               key={link.href}
               href={VERIFICATION_AWARE_NAV_PATHS.has(link.href) ? withEnvironment(link.href) : link.href}
-              active={isActive(pathname, link.href)}
+              active={!link.external && isActive(pathname, link.href)}
+              external={link.external}
             >
               {link.label}
             </NavLink>
@@ -85,7 +99,8 @@ export function Navbar() {
               <SwipeNavLink
                 key={link.href}
                 href={VERIFICATION_AWARE_NAV_PATHS.has(link.href) ? withEnvironment(link.href) : link.href}
-                active={isActive(pathname, link.href)}
+                active={!link.external && isActive(pathname, link.href)}
+                external={link.external}
               >
                 {link.label}
               </SwipeNavLink>
@@ -133,10 +148,22 @@ function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function NavLink({ href, active, children }: { href: string; active?: boolean; children: React.ReactNode }) {
+function NavLink({
+  href,
+  active,
+  external,
+  children,
+}: {
+  href: string;
+  active?: boolean;
+  external?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <Link
       href={href}
+      target={external ? "_blank" : undefined}
+      rel={external ? "noreferrer" : undefined}
       className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
         active ? "bg-white/12 text-white" : "text-white/70 hover:bg-white/8 hover:text-white"
       }`}
@@ -146,10 +173,22 @@ function NavLink({ href, active, children }: { href: string; active?: boolean; c
   );
 }
 
-function SwipeNavLink({ href, active, children }: { href: string; active?: boolean; children: React.ReactNode }) {
+function SwipeNavLink({
+  href,
+  active,
+  external,
+  children,
+}: {
+  href: string;
+  active?: boolean;
+  external?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <Link
       href={href}
+      target={external ? "_blank" : undefined}
+      rel={external ? "noreferrer" : undefined}
       className={`snap-start whitespace-nowrap rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
         active
           ? "border-cyan-300/45 bg-cyan-300/18 text-cyan-100 shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset]"

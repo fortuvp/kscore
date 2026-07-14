@@ -4,16 +4,16 @@
     {
       "name": "verified-agents-sepolia",
       "type": "archive",
-      "description": "Submit ERC-8004 agents to, inspect, challenge, appeal, provide evidence for, or withdraw from the Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum Sepolia. Use for testnet Verified Agents registry operations, submission drafting, duplicate checks, policy and schema validation, live stake or arbitration-cost reads, and PGTCR dispute lifecycle work at registry 0x3162df9669affa8b6b6ff2147afa052249f00447.",
+      "description": "Operate the permissionless Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum Sepolia for ERC-8004 submissions, inspection, challenges, evidence, appeals, and withdrawals. Always load the complete current Kleros Skills package for live PGTCR mechanics; use this overlay for fixed routing, source identity, policy checks, state labels, economics, and duplicate safeguards at 0x3162df9669affa8b6b6ff2147afa052249f00447.",
       "url": "http://localhost:3000/skills/verified-agents-sepolia.tar.gz",
-      "digest": "sha256:82ae02de355dcfe3bd3ccd0677e4dc3058069d4b39f0b664282248985d94de90"
+      "digest": "sha256:2b706ad4ede8d1a73f8c8d0602944c8453632a2677081a99e300964e55230d83"
     },
     {
       "name": "verified-agents-mainnet",
       "type": "archive",
-      "description": "Submit ERC-8004 agents to, inspect, challenge, appeal, provide evidence for, or withdraw from the Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum mainnet. Use for production Verified Agents registry operations, submission drafting, duplicate checks, policy and schema validation, live stake or arbitration-cost reads, and PGTCR dispute lifecycle work at registry 0x118155741eea23f56b3bd59b0c1342d5daaa6d07.",
+      "description": "Operate the permissionless Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum mainnet for ERC-8004 submissions, inspection, challenges, evidence, appeals, and withdrawals. Always load the complete current Kleros Skills package for live PGTCR mechanics; use this overlay for fixed routing, source identity, policy checks, state labels, economics, and duplicate safeguards at 0x118155741eea23f56b3bd59b0c1342d5daaa6d07.",
       "url": "http://localhost:3000/skills/verified-agents-mainnet.tar.gz",
-      "digest": "sha256:637c22be60dede99d5a70bb90d99301231f9314d4fc3cc86920f74ebef5e915c"
+      "digest": "sha256:a6c74b8bb94f1275537dd1e97a0fcfff9d647b496e30d1f1f27eaeefed7e0cd1"
     }
   ]
 }

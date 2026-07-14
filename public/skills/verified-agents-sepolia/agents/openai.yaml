@@ -1,4 +1,4 @@
 interface:
   display_name: "Verified Agents · Sepolia"
-  short_description: "Submit and curate Sepolia verified agents"
-  default_prompt: "Use $verified-agents-sepolia to prepare and verify a Sepolia Verified Agents submission."
+  short_description: "Operate Sepolia Verified Agents safely"
+  default_prompt: "Use $verified-agents-sepolia with the complete Kleros Skills package to safely prepare a Sepolia Verified Agents operation."

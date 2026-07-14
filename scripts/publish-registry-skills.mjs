@@ -17,6 +17,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const publicRoot = resolve(root, "public");
 const checkOnly = process.argv.includes("--check");
 const skillNames = ["verified-agents-sepolia", "verified-agents-mainnet"];
+const klerosSkillsUrl = "https://skills.kleros.io/";
+const klerosSkillsSourceUrl = "https://github.com/kleros/kleros-skills";
 const siteUrl = normalizeSiteUrl(
   process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000",
 );
@@ -144,12 +146,22 @@ for (const name of skillNames) {
 
 const publicSkill = `---
 name: verified-agents
-description: Discover the registry-specific Verified Agents Stake Curate skills for Sepolia testnet and Ethereum mainnet submissions, disputes, evidence, appeals, and withdrawals.
+description: Discover and route the registry-specific DEX8004 Verified Agents skills for the permissionless Stake Curate (PermanentGTCR/PGTCR) registries on Sepolia and Ethereum mainnet. Always load the complete current Kleros Skills package before submissions, challenges, evidence, appeals, or withdrawals.
 ---
 
-# Verified Agents registry skills
+# DEX8004 Verified Agents skills
 
-Choose the verification registry environment independently from the ERC-8004 agent's source chain.
+This is a product and registry routing overlay for two permissionless, policy-governed PGTCR registries. It does not replace Kleros' operational instructions.
+
+## Required Kleros context
+
+Before any registry action, install or load the **complete** [Kleros Skills package](${klerosSkillsUrl}) from its [source repository](${klerosSkillsSourceUrl}). Start with [the upstream router](${klerosSkillsUrl}SKILL.md), then load \`kleros-curate/SKILL.md\` and the current Stake Curate, MetaEvidence, item JSON, deposit, ABI, and IPFS references it routes to. Do not proceed with a write when those files cannot be loaded.
+
+These local skills follow the registry-context pattern demonstrated by [\`scout-registries.md\`](${klerosSkillsSourceUrl}/blob/master/kleros-curate/references/scout-registries.md): upstream Kleros Skills owns contract operations; DEX8004 supplies fixed Verified Agents addresses, ERC-8004 identity rules, product states, and additional safeguards. Verified Agents is PGTCR, not Scout or Light Curate.
+
+## Choose the verification registry
+
+Choose the verification registry independently from the ERC-8004 agent's source chain.
 
 ${skillMetadata
   .map(
@@ -157,11 +169,31 @@ ${skillMetadata
       `- [${skill.displayName}](${skill.skillUrl}) — ${skill.description} [Installable archive](${skill.url}).`,
   )
   .join("\n")}
+
+## Interpret the signal conservatively
+
+- **Pending** is not verified. **Active / verified** means collateral is active and the item currently complies with this registry's policy; it is not a universal safety guarantee. **Disputed** is unresolved. **Removed** means an adverse challenge/dispute found the item non-compliant. **Withdrawn** is a voluntary exit without an adverse ruling and is not evidence of non-compliance.
+- Optional collateral above the minimum can improve placement in stake-ranked DEX8004 views and signal confidence, but it does not prove compliance or guarantee trust, usage, or clients.
+- A successful challenger may earn collateral; an unsuccessful challenger can lose stake and incur fees. Never describe challenging as guaranteed profit.
+- A successfully finalized, voluntary, unchallenged withdrawal returns 100% of the recorded ERC20 item stake and recorded native arbitration deposit after the live withdrawal period. Gas and upload costs are separate, and a dispute can delay or prevent recovery.
 `;
 
-const llmsText = `# DEX8004 Verified Agents skills
+const llmsText = `# DEX8004 Verified Agents
 
-> Registry-specific, submission-first instructions for the Verified Agents Stake Curate / PermanentGTCR / PGTCR registries.
+> Agent-readable routing and safety overlay for two permissionless, policy-governed Stake Curate / PermanentGTCR / PGTCR registries.
+
+## Load Kleros Skills first
+
+Install or load the complete current Kleros Skills package before any registry operation:
+
+- Package and agent router: ${klerosSkillsUrl}
+- Source: ${klerosSkillsSourceUrl}
+- Curate operations: ${klerosSkillsSourceUrl}/blob/master/kleros-curate/SKILL.md
+- Stake Curate operations: ${klerosSkillsSourceUrl}/blob/master/kleros-curate/references/stake-curate.md
+
+Use the upstream package for operational Kleros mechanics. Use the DEX8004 skills below as the fixed-registry overlay for addresses, ERC-8004 source identity, duplicate prevention, status language, economics, and policy safeguards. This mirrors the context-overlay pattern of ${klerosSkillsSourceUrl}/blob/master/kleros-curate/references/scout-registries.md, but Verified Agents is PGTCR—not Scout or Light Curate.
+
+## Registry skills
 
 ${skillMetadata
   .map(
@@ -169,6 +201,16 @@ ${skillMetadata
       `- [${skill.displayName}](${skill.skillUrl}): ${skill.description} Installable bundle: ${skill.url}`,
   )
   .join("\n")}
+
+Sepolia registry (chain 11155111): 0x3162df9669affa8b6b6ff2147afa052249f00447
+Ethereum mainnet registry (chain 1): 0x118155741eea23f56b3bd59b0c1342d5daaa6d07
+
+## Product semantics and economics
+
+- Pending is not verified. Active/verified means currently collateralized and compliant with this registry's policy only. Disputed is unresolved. Removed follows an adverse dispute. Withdrawn is voluntary and is not evidence of non-compliance.
+- Stake above the live minimum may improve stake-ranked placement and signal confidence, but never proves compliance or guarantees clients.
+- Correct challengers may earn collateral; incorrect challengers can lose stake and incur fees. Read every amount and rule live.
+- After the live waiting period, a successfully finalized voluntary withdrawal returns 100% of the recorded ERC20 item stake and recorded native arbitration deposit. Gas/upload costs are excluded; disputes put recovery at risk.
 
 Discovery index: ${siteUrl}/.well-known/agent-skills/index.json
 `;

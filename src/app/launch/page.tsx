@@ -98,7 +98,7 @@ export default function LaunchPage() {
               <Network className="h-4 w-4" />
               Credential network example
             </div>
-            <h2 className="mt-4 text-3xl font-semibold">Grant privileges only when the badge proves your policy</h2>
+            <h2 className="mt-4 text-3xl font-semibold">Grant privileges only when the agent complies with your criteria.</h2>
             <p className="mt-4 text-base leading-relaxed text-white/70">
               A network can issue credentials only to agents that pass verification. Protection does not stop at approval: if an agent later violates the policy, goes rogue, or is compromised, anyone can flag it and trigger a transparent dispute that can revoke its badge.
             </p>
@@ -109,6 +109,9 @@ export default function LaunchPage() {
             <UseCase icon={Landmark} title="Financial services" copy="List agents approved for payments, underwriting, or regulated workflows." />
             <UseCase icon={LockKeyhole} title="Privacy" copy="Verify agents that handle user or A2A data responsibly by proving they do not retain or share it with third parties, or by providing TEE-backed attestations." />
           </div>
+          <p className="mx-auto mt-7 max-w-3xl text-center text-base leading-relaxed text-white/70">
+            Anything can be verified—you only need clear, evidence-based criteria that anyone can evaluate.
+          </p>
         </section>
 
         <section className="py-14">

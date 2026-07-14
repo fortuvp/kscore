@@ -1,7 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { Copy, ExternalLink, WandSparkles } from "lucide-react";
+import {
+  Copy,
+  ExternalLink,
+  Rocket,
+  ShieldCheck,
+  WandSparkles,
+} from "lucide-react";
 import { toast } from "sonner";
 import {
   useAccount,
@@ -11,12 +17,12 @@ import {
   useReadContract,
   useWriteContract,
 } from "wagmi";
-import { formatEther, formatUnits, isAddress, parseEventLogs } from "viem";
+import { formatEther, formatUnits, parseEventLogs } from "viem";
 
 import PermanentGTCRAbi from "@/lib/abi/PermanentGTCR.json";
 import { ERC20_ABI } from "@/lib/abi/erc20";
 import { IARBITRATOR_ABI } from "@/lib/abi/iArbitrator";
-import type { AgentSubgraphNetwork } from "@/lib/agent-networks";
+import { getAgentSubgraphLabel, type AgentSubgraphNetwork } from "@/lib/agent-networks";
 import { executeConfirmedTransaction } from "@/lib/confirmed-transaction";
 import { fetchIpfsJson, ipfsToGatewayUrl, uploadJsonToIpfs } from "@/lib/ipfs";
 import {
@@ -28,11 +34,17 @@ import {
 } from "@/lib/pgtcr-submission";
 
 import { InfoTooltip } from "@/components/info-tooltip";
+import {
+  SubmissionReviewDialog,
+  type SubmissionPreview,
+  type SubmissionSigningPhase,
+} from "@/components/pgtcr/submission-review-dialog";
 import { useVerificationEnvironment } from "@/components/verification-environment-provider";
 import { Badge as UiBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -149,6 +161,10 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
   const [policyUri, setPolicyUri] = React.useState<string | null>(null);
   const [values, setValues] = React.useState<Record<string, string>>({});
   const [approvalConfirmed, setApprovalConfirmed] = React.useState(false);
+  const [reviewOpen, setReviewOpen] = React.useState(false);
+  const [submissionPreview, setSubmissionPreview] = React.useState<SubmissionPreview | null>(null);
+  const [signingPhase, setSigningPhase] = React.useState<SubmissionSigningPhase>("idle");
+  const [signingError, setSigningError] = React.useState<string | null>(null);
 
   React.useEffect(() => setDraftAgentId(props.agentId), [props.agentId]);
 
@@ -271,7 +287,7 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
   );
   React.useEffect(() => {
     setApprovalConfirmed(false);
-  }, [depositInput, environment, registryAddress, tokenAddress]);
+  }, [address, depositInput, environment, registryAddress, tokenAddress]);
   const deposit = depositResult.value ?? 0n;
   const allowance = allowanceRead.data as bigint | undefined;
   const tokenBalance = tokenBalanceRead.data as bigint | undefined;
@@ -281,33 +297,28 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
   const hasEnoughNativeBalance =
     arbitrationCost === undefined || nativeBalance === undefined || nativeBalance >= arbitrationCost;
 
-  async function approveStake() {
-    if (!publicClient || !address || !tokenAddress || !registryAddress || depositResult.value === null) return;
-    setLoading(true);
-    try {
-      toast.message("Checking approval and waiting for confirmation…");
-      await executeConfirmedTransaction({
-        simulate: async () =>
-          (
-            await publicClient.simulateContract({
-              account: address,
-              address: tokenAddress,
-              abi: ERC20_ABI,
-              functionName: "approve",
-              args: [registryAddress, deposit],
-            })
-          ).request,
-        write: (request) => writeContractAsync(request),
-        wait: (hash) => publicClient.waitForTransactionReceipt({ hash }),
-      });
-      await allowanceRead.refetch();
-      setApprovalConfirmed(true);
-      toast.success(`${resolvedTokenSymbol} approval confirmed.`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Approval failed.");
-    } finally {
-      setLoading(false);
+  async function approveStake(approvedDeposit: bigint) {
+    if (!publicClient || !address || !tokenAddress || !registryAddress) {
+      throw new Error("Token approval data is not ready.");
     }
+    toast.message("Confirm the collateral approval in your wallet…");
+    await executeConfirmedTransaction({
+      simulate: async () =>
+        (
+          await publicClient.simulateContract({
+            account: address,
+            address: tokenAddress,
+            abi: ERC20_ABI,
+            functionName: "approve",
+            args: [registryAddress, approvedDeposit],
+          })
+        ).request,
+      write: (request) => writeContractAsync(request),
+      wait: (hash) => publicClient.waitForTransactionReceipt({ hash }),
+    });
+    await allowanceRead.refetch();
+    setApprovalConfirmed(true);
+    toast.success(`${resolvedTokenSymbol} collateral approved.`);
   }
 
   async function copyTokenAddress() {
@@ -336,36 +347,94 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
     }
   }
 
-  async function onSubmit() {
-    if (!isConnected || !address) return toast.error("Connect your wallet to submit.");
-    if (!onRequiredChain) return toast.error(`Switch to ${deployment.chainName}.`);
-    if (!publicClient || !registryAddress || !tokenAddress) return toast.error("Registry data is not ready.");
-    if (arbitrationCost === undefined) return toast.error("The live arbitration fee is not available.");
-    if (depositResult.error || depositResult.value === null) return toast.error(depositResult.error || "Invalid stake.");
-    if (!hasEnoughTokenBalance) return toast.error(`Insufficient ${resolvedTokenSymbol} balance.`);
-    if (!hasEnoughNativeBalance) return toast.error("Insufficient ETH for the arbitration fee.");
-    if (!columns?.length) return toast.error("Registry schema columns are unavailable.");
-
-    if (needsApproval && !approvalConfirmed) {
-      await approveStake();
-      return;
+  function prepareSubmission(): SubmissionPreview | null {
+    if (!isConnected || !address) {
+      toast.error("Connect your wallet to submit.");
+      return null;
+    }
+    if (!onRequiredChain) {
+      toast.error(`Switch to ${deployment.chainName}.`);
+      return null;
+    }
+    if (!publicClient || !registryAddress || !tokenAddress) {
+      toast.error("Registry data is not ready.");
+      return null;
+    }
+    if (arbitrationCost === undefined) {
+      toast.error("The live arbitration fee is not available.");
+      return null;
+    }
+    if (allowance === undefined) {
+      toast.error("The token approval status is still loading.");
+      return null;
+    }
+    if (depositResult.error || depositResult.value === null) {
+      toast.error(depositResult.error || "Invalid stake.");
+      return null;
+    }
+    if (!hasEnoughTokenBalance) {
+      toast.error(`Insufficient ${resolvedTokenSymbol} balance.`);
+      return null;
+    }
+    if (!hasEnoughNativeBalance) {
+      toast.error("Insufficient ETH for the arbitration fee.");
+      return null;
+    }
+    if (!columns?.length) {
+      toast.error("Registry schema columns are unavailable.");
+      return null;
     }
 
     const built = buildPgtcrItemValues({ columns, agentId: draftAgentId, values });
-    if (!built.values) return toast.error(built.error || "Review the form fields.");
+    if (!built.values) {
+      toast.error(built.error || "Review the form fields.");
+      return null;
+    }
     if (props.onAutoFill && props.autoFilledAgentId !== draftAgentId.trim()) {
-      return toast.error("Auto-fill and review the current agent number before submitting.");
+      toast.error("Auto-fill and review the current agent number before submitting.");
+      return null;
     }
 
+    return {
+      values: built.values,
+      deposit: depositResult.value,
+      arbitrationCost,
+      approvalRequired: needsApproval && !approvalConfirmed,
+    };
+  }
+
+  function openSubmissionReview() {
+    const nextPreview = prepareSubmission();
+    if (!nextPreview) return;
+    setSubmissionPreview(nextPreview);
+    setSigningPhase("idle");
+    setSigningError(null);
+    setReviewOpen(true);
+  }
+
+  async function startSigning() {
+    const nextPreview = prepareSubmission();
+    if (!nextPreview || !columns || !publicClient || !address || !registryAddress) return;
+
+    setSubmissionPreview(nextPreview);
+    setSigningError(null);
+    setSigningPhase("checking");
     setLoading(true);
     try {
-      const canonicalAgentId = built.values[normalizePgtcrColumnKey(columns[0].label)];
+      const canonicalAgentId = nextPreview.values[normalizePgtcrColumnKey(columns[0].label)];
       await confirmNoDuplicate(canonicalAgentId);
+
+      if (needsApproval && !approvalConfirmed) {
+        setSigningPhase("approving");
+        await approveStake(nextPreview.deposit);
+      }
+
       const itemUri = await uploadJsonToIpfs(
-        { columns, values: built.values },
+        { columns, values: nextPreview.values },
         { operation: "item", pinToGraph: false, filename: "item.json" }
       );
-      toast.message("Checking submission and waiting for confirmation…");
+      setSigningPhase("submitting");
+      toast.message("Confirm the registry submission in your wallet…");
       const { hash, receipt } = await executeConfirmedTransaction({
         simulate: async () =>
           (
@@ -374,8 +443,8 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
               address: registryAddress,
               abi: PermanentGTCRAbi,
               functionName: "addItem",
-              args: [itemUri, deposit],
-              value: arbitrationCost,
+              args: [itemUri, nextPreview.deposit],
+              value: nextPreview.arbitrationCost,
             })
           ).request,
         write: (request) => writeContractAsync(request),
@@ -423,9 +492,13 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
           View transaction
         </a>
       );
+      setSigningPhase("complete");
       props.onSubmitted?.();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Submission failed.");
+      const message = error instanceof Error ? error.message : "Submission failed.";
+      setSigningError(message);
+      setSigningPhase("idle");
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -552,11 +625,28 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
       })}
 
       <div className="space-y-2">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Label htmlFor="stake-deposit">Stake deposit ({resolvedTokenSymbol})</Label>
           <InfoTooltip label="About the stake deposit">
             This ERC-20 stake backs the listing in Stake Curate. It must meet the live registry minimum and can be affected by a successful challenge.
           </InfoTooltip>
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300/20 bg-cyan-400/[0.08] px-2.5 py-1 text-[11px] font-semibold text-cyan-100 transition hover:border-cyan-300/40 hover:bg-cyan-400/[0.13] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+              >
+                <Rocket className="h-3.5 w-3.5" aria-hidden="true" />
+                How to boost
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-[min(20rem,calc(100vw-2rem))] border-cyan-300/20 bg-[#09121d] leading-relaxed shadow-2xl">
+              <p className="text-sm font-semibold text-cyan-100">Stake more. Rank higher.</p>
+              <p className="mt-1.5 text-xs leading-5 text-white/62">
+                Increase collateral above the minimum to gain leaderboard visibility and attract more clients.
+              </p>
+            </PopoverContent>
+          </Popover>
           {tokenAddress ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -572,51 +662,69 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
             </Tooltip>
           ) : null}
         </div>
-        <Input
-          id="stake-deposit"
-          inputMode="decimal"
-          placeholder={formatUnits(submissionMinDeposit, resolvedTokenDecimals)}
-          value={depositInput}
-          onChange={(event) => setValues((previous) => ({ ...previous, __deposit: event.target.value }))}
-          className={FORM_CONTROL_CLASS}
-          aria-invalid={Boolean(depositResult.error)}
-        />
+        <div className="relative">
+          <Rocket
+            className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-cyan-300"
+            aria-hidden="true"
+          />
+          <Input
+            id="stake-deposit"
+            inputMode="decimal"
+            placeholder={formatUnits(submissionMinDeposit, resolvedTokenDecimals)}
+            value={depositInput}
+            onChange={(event) => setValues((previous) => ({ ...previous, __deposit: event.target.value }))}
+            className={`${FORM_CONTROL_CLASS} pl-10 pr-20 font-mono`}
+            aria-invalid={Boolean(depositResult.error)}
+          />
+          <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted-foreground">
+            {resolvedTokenSymbol}
+          </span>
+        </div>
         <p className={`text-xs ${depositResult.error ? "text-red-300" : "text-muted-foreground"}`}>
           {depositResult.error || "Leave empty to use the current minimum stake."}
         </p>
       </div>
 
-      <section className="space-y-4 rounded-xl border border-cyan-400/20 bg-cyan-500/[0.06] p-5" aria-labelledby="before-submit-title">
+      <section className="space-y-4 rounded-2xl border border-cyan-400/20 bg-gradient-to-b from-cyan-500/[0.08] to-cyan-500/[0.025] p-5 sm:p-6" aria-labelledby="before-submit-title">
         <div>
           <h2 id="before-submit-title" className="font-semibold text-cyan-100">Before you submit</h2>
-          <p className="mt-1 text-xs text-muted-foreground">Live values from the selected Stake Curate / PGTCR registry.</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            Review the two assets posted to Stake Curate. They remain separate and keep their own token units.
+          </p>
         </div>
-        <dl className="grid gap-3 text-sm sm:grid-cols-2">
-          <SummaryRow label="Verification network" tooltip="The chain where the verification registry and all related transactions live.">
-            {deployment.chainName} · {environment === "mainnet" ? "Mainnet" : "Testnet"}
-          </SummaryRow>
-          <SummaryRow label="Verification registry" tooltip="The PermanentGTCR contract receiving this submission.">
-            {registryAddress && isAddress(registryAddress) ? (
-              <a className="inline-flex items-center gap-1 font-mono text-xs text-cyan-200 hover:underline" href={`${deployment.explorerBaseUrl}/address/${registryAddress}`} target="_blank" rel="noreferrer">
-                {registryAddress.slice(0, 8)}…{registryAddress.slice(-6)} <ExternalLink className="h-3 w-3" />
-              </a>
-            ) : "—"}
-          </SummaryRow>
-          <SummaryRow label="Stake held as collateral" tooltip="The selected ERC-20 amount is held by the registry while the item remains listed and may be forfeited after an adverse dispute ruling.">
-            <span className="font-mono">{formatUnits(deposit, resolvedTokenDecimals)} {resolvedTokenSymbol}</span>
-          </SummaryRow>
-          <SummaryRow label="Arbitration fee" tooltip="Native ETH sent as msg.value to cover the registry's current arbitration cost; it is separate from the token stake.">
-            <span className="font-mono">{arbitrationCost !== undefined ? `${formatEther(arbitrationCost)} ETH` : "Loading…"}</span>
-          </SummaryRow>
-        </dl>
-        <div className="rounded-lg border border-white/10 bg-black/15 p-3 text-xs leading-relaxed text-muted-foreground">
-          <span className="inline-flex items-center gap-1 font-medium text-foreground">
-            Withdrawal
-            <InfoTooltip label="About withdrawal">
-              You can start withdrawal when you no longer wish to maintain the listing, but the item remains registered and disputable during the waiting period. A lost challenge may affect the stake.
-            </InfoTooltip>
-          </span>{" "}
-          You may start withdrawal whenever you no longer want or believe you can maintain compliance. You must then wait {registry && registry.success ? formatPeriod(registry.registry.withdrawingPeriod) : "the live registry period"} and finalize withdrawal; it is not immediate.
+        <div className="overflow-hidden rounded-xl border border-white/10 bg-[#080e19]/75 shadow-inner shadow-black/20">
+          <dl className="divide-y divide-white/[0.08] text-sm">
+            <CheckoutRow
+              label="Collateralized stake"
+              detail="ERC-20 collateral held while your agent is listed"
+              amount={`${formatUnits(deposit, resolvedTokenDecimals)} ${resolvedTokenSymbol}`}
+            />
+            <CheckoutRow
+              label="Arbitration fee deposit"
+              detail="Native ETH posted with the registry submission"
+              amount={arbitrationCost !== undefined ? `${formatEther(arbitrationCost)} ETH` : "Loading…"}
+            />
+          </dl>
+          <div className="flex flex-col gap-2 border-t border-cyan-300/20 bg-cyan-400/[0.06] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-xs font-semibold uppercase tracking-[0.14em] text-cyan-100/70">Due at submission</span>
+            <div className="flex flex-wrap gap-2 font-mono text-xs font-semibold text-cyan-50">
+              <span className="rounded-md border border-cyan-300/15 bg-black/20 px-2 py-1">
+                {formatUnits(deposit, resolvedTokenDecimals)} {resolvedTokenSymbol}
+              </span>
+              <span className="rounded-md border border-cyan-300/15 bg-black/20 px-2 py-1">
+                {arbitrationCost !== undefined ? `${formatEther(arbitrationCost)} ETH` : "Loading ETH…"}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-3 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.07] p-4 text-xs leading-relaxed text-emerald-50/80">
+          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" aria-hidden="true" />
+          <div>
+            <p className="font-semibold text-emerald-100">100% refundable on voluntary withdrawal</p>
+            <p className="mt-1">
+              If no challenge succeeds, the contract returns both your {resolvedTokenSymbol} stake and ETH arbitration deposit after the {registry && registry.success ? formatPeriod(registry.registry.withdrawingPeriod) : "live"} waiting period and final withdrawal transaction. The listing remains challengeable while you wait. Network gas is not refunded.
+            </p>
+          </div>
         </div>
         {environment === "mainnet" ? (
           <div className="rounded-lg border border-red-400/30 bg-red-500/10 p-3 text-xs font-medium leading-relaxed text-red-100">
@@ -627,12 +735,14 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
 
       <div className="flex flex-col gap-2 sm:flex-row">
         <Button
-          onClick={() => void onSubmit()}
+          onClick={openSubmissionReview}
           disabled={
             loading ||
             !isConnected ||
             !onRequiredChain ||
             !columns?.length ||
+            arbitrationCost === undefined ||
+            allowance === undefined ||
             Boolean(depositResult.error) ||
             balanceIssues.length > 0 ||
             Boolean(props.onAutoFill && !hasCurrentAutoFill)
@@ -643,9 +753,7 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
             ? "Working…"
             : balanceIssues.length
               ? "Insufficient balance"
-              : needsApproval && !approvalConfirmed
-                ? `Approve ${resolvedTokenSymbol}`
-                : `Submit on ${deployment.chainName}`}
+              : `Submit on ${deployment.chainName}`}
         </Button>
         {props.onCancel ? <Button variant="outline" onClick={props.onCancel} disabled={loading}>Cancel</Button> : null}
       </div>
@@ -653,18 +761,44 @@ export function CollateralizeAgentForm(props: CollateralizeAgentFormProps) {
       {!isConnected ? <p className="text-xs text-muted-foreground">Connect your wallet to continue.</p> : null}
       {isConnected && !onRequiredChain ? <p className="text-xs text-red-300">Wrong network. Switch to {deployment.chainName}.</p> : null}
       {balanceIssues.map((issue) => <p key={issue} className="text-xs text-red-300">{issue}</p>)}
+
+      <SubmissionReviewDialog
+        open={reviewOpen}
+        onOpenChange={(nextOpen) => {
+          if (loading) return;
+          setReviewOpen(nextOpen);
+          if (!nextOpen && signingPhase !== "complete") {
+            setSigningError(null);
+            setSigningPhase("idle");
+          }
+        }}
+        preview={submissionPreview}
+        columns={columns || []}
+        agentNetwork={getAgentSubgraphLabel(props.sourceNetwork)}
+        submitter={address}
+        tokenSymbol={resolvedTokenSymbol}
+        tokenDecimals={resolvedTokenDecimals}
+        chainName={deployment.chainName}
+        approvalRequired={submissionPreview?.approvalRequired ?? (needsApproval && !approvalConfirmed)}
+        approvalConfirmed={approvalConfirmed}
+        phase={signingPhase}
+        error={signingError}
+        loading={loading}
+        onStart={() => void startSigning()}
+        onDone={() => setReviewOpen(false)}
+      />
     </div>
   );
 }
 
-function SummaryRow({ label, tooltip, children }: { label: string; tooltip: string; children: React.ReactNode }) {
+function CheckoutRow({ label, detail, amount }: { label: string; detail: string; amount: string }) {
   return (
-    <div className="space-y-1 rounded-lg border border-white/[0.08] bg-black/10 p-3">
-      <dt className="flex items-center gap-1 text-xs text-muted-foreground">
-        {label}
-        <InfoTooltip label={`About ${label}`}>{tooltip}</InfoTooltip>
+    <div className="flex flex-col gap-2 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+      <dt>
+        <span className="block font-medium text-foreground">{label}</span>
+        <span className="mt-0.5 block text-xs text-muted-foreground">{detail}</span>
       </dt>
-      <dd className="text-foreground">{children}</dd>
+      <dd className="shrink-0 font-mono font-semibold text-cyan-50">{amount}</dd>
     </div>
   );
 }

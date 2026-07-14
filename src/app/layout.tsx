@@ -19,8 +19,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DEX8004 - The Safest Dapp for AI Agents",
-  description: "Discover, verify, and manage ERC-8004 agents with Kleros-backed trust signals.",
+  title: {
+    default: "DEX8004 — Verifiable Trust for AI Agents",
+    template: "%s · DEX8004",
+  },
+  description: "Discover, collateralize, and evaluate ERC-8004 agents through open, Kleros-backed registries.",
 };
 
 export default function RootLayout({
@@ -42,8 +45,16 @@ export default function RootLayout({
         >
           <Web3Provider>
             <TooltipProvider>
+              <a
+                href="#main-content"
+                className="fixed left-4 top-3 z-[100] -translate-y-20 rounded-lg bg-cyan-100 px-4 py-2 text-sm font-semibold text-slate-950 shadow-xl transition focus:translate-y-0 focus:outline-none focus:ring-2 focus:ring-cyan-300"
+              >
+                Skip to content
+              </a>
               <Navbar />
-              <main className="min-h-[calc(100vh-3.5rem)] overflow-x-hidden">{children}</main>
+              <main id="main-content" className="min-h-[calc(100vh-3.5rem)] overflow-x-hidden">
+                {children}
+              </main>
               <AppFooter />
               <Toaster />
             </TooltipProvider>

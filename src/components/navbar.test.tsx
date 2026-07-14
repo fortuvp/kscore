@@ -30,4 +30,23 @@ describe("Navbar", () => {
       )
     ).toBe(true);
   });
+
+  it("links to the Kleros skills package and its source from both navigation layouts", () => {
+    render(<Navbar />);
+
+    expect(
+      screen
+        .getAllByRole("link", { name: "Skills" })
+        .every((link) => link.getAttribute("href") === "https://skills.kleros.io/" && link.getAttribute("target") === "_blank")
+    ).toBe(true);
+    expect(
+      screen
+        .getAllByRole("link", { name: "Source code" })
+        .every(
+          (link) =>
+            link.getAttribute("href") === "https://github.com/kleros/kleros-skills" &&
+            link.getAttribute("target") === "_blank"
+        )
+    ).toBe(true);
+  });
 });

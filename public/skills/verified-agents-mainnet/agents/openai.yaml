@@ -1,4 +1,4 @@
 interface:
   display_name: "Verified Agents · Mainnet"
-  short_description: "Submit and curate mainnet verified agents"
-  default_prompt: "Use $verified-agents-mainnet to prepare and verify an Ethereum mainnet Verified Agents submission."
+  short_description: "Operate mainnet Verified Agents safely"
+  default_prompt: "Use $verified-agents-mainnet with the complete Kleros Skills package to safely prepare an Ethereum mainnet Verified Agents operation."

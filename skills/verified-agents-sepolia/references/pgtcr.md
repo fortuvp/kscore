@@ -1,6 +1,8 @@
 # Verified Agents PGTCR operations
 
-This reference is adapted from the PGTCR-only parts of Kleros' MIT-licensed [`kleros-curate`](https://github.com/kleros/kleros-skills/tree/73fd2fd034a73dc50530651c03fba74e9e0c84c7/kleros-curate) skill at commit `73fd2fd034a73dc50530651c03fba74e9e0c84c7`. Light Curate, Scout, factory deployment, and registry administration are intentionally omitted. The upstream license is bundled as `LICENSE.kleros-skills`.
+This reference is adapted from the PGTCR-only parts of Kleros' MIT-licensed [`kleros-curate`](https://github.com/kleros/kleros-skills/tree/73fd2fd034a73dc50530651c03fba74e9e0c84c7/kleros-curate) skill at commit `73fd2fd034a73dc50530651c03fba74e9e0c84c7`. The upstream license is bundled as `LICENSE.kleros-skills`.
+
+Install or load the **complete, current** [Kleros Skills package](https://skills.kleros.io/) before using this reference. Read its `kleros-curate/SKILL.md` and current `references/stake-curate.md` plus the shared MetaEvidence, item JSON, deposit, ABI, and IPFS references routed by that skill. This file adds Verified Agents-specific safeguards and exact registry assumptions; it is not a substitute for the upstream operational package. Light Curate, Scout, factory deployment, and registry administration are intentionally not duplicated here.
 
 ## Contents
 
@@ -13,7 +15,7 @@ This reference is adapted from the PGTCR-only parts of Kleros' MIT-licensed [`kl
 
 ## PGTCR model
 
-`PermanentGTCR` is Stake Curate. An item carries ERC20 collateral while native ETH pays arbitration. Submission is `approve` followed by `addItem(string,uint256)`. Challenge also uses ERC20 collateral plus native arbitration cost. Withdrawal is `startWithdrawItem`, a live waiting period, then `withdrawItem`.
+`PermanentGTCR` is Stake Curate. An item carries ERC20 collateral plus a recorded native arbitration deposit. Submission is `approve` followed by `addItem(string,uint256)`. Challenge also uses ERC20 collateral plus native arbitration cost. Withdrawal is `startWithdrawItem`, a live waiting period, then `withdrawItem`; an unchallenged final withdrawal returns both recorded deposits to the submitter.
 
 Use Goldsky as the primary indexed view and the chain as the source of truth for writes. Never infer accepted status from the raw enum alone:
 
@@ -184,7 +186,7 @@ Withdrawal is always two transactions:
 3. Wait until the contract permits finalization. The item remains disputable during this period.
 4. In a new confirmation step, simulate and confirm `withdrawItem(itemID)`.
 
-Do not describe withdrawal as immediate or guaranteed. A valid challenge can affect the stake.
+For the deployed Verified Agents implementations, `_doWithdrawItem` returns the item's full recorded ERC20 `stake` and native `arbitrationDeposit` to the submitter. Describe that as a 100% refund only for a successfully finalized voluntary withdrawal: gas and IPFS/upload costs are separate, and a challenge may delay withdrawal or award funds to the challenger. Do not describe withdrawal as immediate or guaranteed; re-check bytecode, state, and simulation first.
 
 ## Minimal ABIs
 

@@ -1,15 +1,44 @@
 ---
 name: verified-agents-mainnet
-description: Submit ERC-8004 agents to, inspect, challenge, appeal, provide evidence for, or withdraw from the Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum mainnet. Use for production Verified Agents registry operations, submission drafting, duplicate checks, policy and schema validation, live stake or arbitration-cost reads, and PGTCR dispute lifecycle work at registry 0x118155741eea23f56b3bd59b0c1342d5daaa6d07.
+description: Operate the permissionless Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum mainnet for ERC-8004 submissions, inspection, challenges, evidence, appeals, and withdrawals. Always load the complete current Kleros Skills package for live PGTCR mechanics; use this overlay for fixed routing, source identity, policy checks, state labels, economics, and duplicate safeguards at 0x118155741eea23f56b3bd59b0c1342d5daaa6d07.
 ---
 
 # Verified Agents on Ethereum Mainnet
 
 Operate only the fixed Ethereum mainnet Verified Agents registry documented in [references/registry.md](references/registry.md). It is Stake Curate, implemented by `PermanentGTCR` (PGTCR), not Light Curate. Keep the verification registry chain independent from the ERC-8004 chain where the submitted agent is registered.
 
+## Load the full Kleros package first
+
+Before every registry operation, install or load the **complete** [Kleros Skills package](https://skills.kleros.io/) from its [source repository](https://github.com/kleros/kleros-skills); do not copy only one reference file. Start with `https://skills.kleros.io/SKILL.md`, then load `kleros-curate/SKILL.md` and the current `references/stake-curate.md`, `references/shared-metaevidence.md`, `references/shared-item-json.md`, `references/shared-deposits.md`, and `references/shared-ipfs-upload.md` files required by the action. Use those files for operational Kleros mechanics and this skill for the Verified Agents routing, identity, duplicate, product-state, and policy safeguards. Stop before a write if the package or a required reference cannot be loaded.
+
+This is a registry-specific overlay in the spirit of Kleros Curate's [`scout-registries.md`](https://github.com/kleros/kleros-skills/blob/master/kleros-curate/references/scout-registries.md), but these registries are **Stake Curate / PermanentGTCR (PGTCR)**, not Scout or Light Curate.
+
+## Registry map and product meaning
+
+Verified Agents uses two permissionless, policy-governed generalized TCR registries:
+
+| Environment | Verification chain | Registry |
+| --- | --- | --- |
+| Testnet | Ethereum Sepolia (`11155111`) | `0x3162df9669affa8b6b6ff2147afa052249f00447` |
+| Mainnet (this skill) | Ethereum (`1`) | `0x118155741eea23f56b3bd59b0c1342d5daaa6d07` |
+
+Anyone may submit a candidate or challenge one with evidence. Treat inclusion as a live signal that the listed item currently satisfies this registry's policy—not as a universal safety guarantee, audit, or Kleros endorsement. Derive state from current contract and dispute history before describing an agent:
+
+- **Pending:** The submission or reinclusion period has not elapsed. The agent is not yet verified.
+- **Active / verified:** The period has elapsed, collateral remains active, and there is no active withdrawal or unresolved/adverse dispute. Say it complies with this registry's policy; make no broader claim.
+- **Disputed:** A challenge is unresolved. Do not call the agent compliant or non-compliant until the ruling is final.
+- **Removed:** A challenge/dispute ended against the item. Say it was removed as non-compliant with the registry policy, with the ruling context.
+- **Withdrawn:** The submitter voluntarily left without an adverse ruling. It is no longer active, but withdrawal alone is not evidence of non-compliance.
+
+## Economic context
+
+- A submitter may collateralize more than `submissionMinDeposit()`. On DEX8004, more collateral can improve placement in stake-ranked views and signal confidence, but it does not prove compliance or guarantee trust, usage, or clients. The full stake is exposed to a valid challenge.
+- Anyone may challenge a non-compliant item. A successful challenger may earn collateral under the live PGTCR rules; an unsuccessful challenger can lose stake and incur arbitration and gas costs. Never present challenging as guaranteed profit.
+- A voluntary, unchallenged two-step withdrawal returns **100% of the recorded ERC20 item stake and recorded native arbitration deposit** to the submitter after the live `withdrawingPeriod`. Gas and upload costs are not refunded, and an unresolved or successful challenge can delay or prevent that recovery. Verify the deployed implementation and simulate before promising an amount.
+
 ## Non-negotiable safeguards
 
-- Read [references/registry.md](references/registry.md) before every task. Read [references/erc8004-source.md](references/erc8004-source.md) and [references/pgtcr.md](references/pgtcr.md) before constructing a submission or transaction.
+- Load the full Kleros package as required above. Read [references/registry.md](references/registry.md) before every task. Read [references/erc8004-source.md](references/erc8004-source.md) and [references/pgtcr.md](references/pgtcr.md) before constructing a submission or transaction.
 - Confirm chain ID `1`, registry bytecode, and the exact registry address before contract calls.
 - Display a mainnet real-funds warning before any upload, approval, or transaction.
 - Read current MetaEvidence, policy, schema, token, periods, multipliers, stake minimum, arbitrator, extra data, and arbitration or appeal cost live. Never quote or transact from cached amounts.
@@ -40,7 +69,7 @@ Follow this workflow in order:
 - **Challenge:** Read the policy and item first. Prepare durable ERC-1497 evidence, calculate challenge stake from live item stake and multiplier, complete the ERC20 approval receipt, read arbitration cost live, simulate `challengeItem`, then request final approval.
 - **Evidence:** Upload and round-trip-check ERC-1497 evidence, simulate `submitEvidence`, then request approval. Never claim an evidence URI proves its own assertions.
 - **Appeal:** Use the challenge-scoped arbitration setting, live appeal period, current ruling, cost, multipliers, and prior contributions. Enforce the losing-side half-time rule; simulate `fundAppeal` with only the remaining amount.
-- **Withdraw:** Explain that an owner may start withdrawal when they no longer wish or are able to maintain compliance. Simulate and confirm `startWithdrawItem`, wait the live `withdrawingPeriod`, then separately simulate and confirm `withdrawItem`. The item remains visible and disputable during the waiting period; never promise recovery if a dispute can forfeit stake.
+- **Withdraw:** Explain that an owner may voluntarily leave without implying an adverse policy finding. Simulate and confirm `startWithdrawItem`, wait the live `withdrawingPeriod`, then separately simulate and confirm `withdrawItem`. If no dispute changes the outcome, finalization returns the recorded ERC20 item stake and recorded native arbitration deposit; exclude gas/upload costs and never promise recovery while a dispute can forfeit funds.
 - **Rewards:** Use exact challenge and round identifiers and simulate `withdrawFeesAndRewards` before approval.
 
 ## Handoff
@@ -49,4 +78,4 @@ Report the live policy and MetaEvidence URIs, source agent chain, registry chain
 
 ## Attribution
 
-This skill adapts only the Stake Curate/PGTCR guidance from Kleros' `kleros-curate` skill pinned at commit `73fd2fd034a73dc50530651c03fba74e9e0c84c7`. See [references/pgtcr.md](references/pgtcr.md) and [LICENSE.kleros-skills](LICENSE.kleros-skills).
+This local overlay supplements—and never replaces—the complete, current [Kleros Skills package](https://skills.kleros.io/). Its bundled PGTCR reference was adapted from Kleros' `kleros-curate` skill at commit `73fd2fd034a73dc50530651c03fba74e9e0c84c7`; see [references/pgtcr.md](references/pgtcr.md), the [upstream source](https://github.com/kleros/kleros-skills), and [LICENSE.kleros-skills](LICENSE.kleros-skills).
