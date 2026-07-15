@@ -16,6 +16,7 @@ import {
 import { formatUnits } from "viem";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { KScoreMark, KScoreWordmark } from "@/components/brand/kscore-logo";
 import { type AgentSubgraphNetwork } from "@/lib/agent-networks";
 import { useVerificationEnvironment } from "@/components/verification-environment-provider";
 
@@ -190,11 +191,13 @@ export default function HomePage() {
 
       <main className="container mx-auto max-w-[1200px] px-5 py-12 sm:px-8 sm:py-16 lg:py-20">
         <section className="relative pb-8 pt-4 text-center sm:pt-8 lg:pt-12">
-          <h1 className="text-balance text-6xl font-black tracking-[-0.04em] sm:text-7xl lg:text-8xl xl:text-[7.2rem]">
-            <span className="bg-gradient-to-r from-cyan-300 via-cyan-200 to-cyan-400 bg-clip-text text-transparent drop-shadow-[0_0_40px_rgba(34,211,238,0.35)]">
-              K
-            </span>
-            <span className="text-white/95">SCORE</span>
+          <h1 className="flex flex-col items-center gap-2 sm:gap-3">
+            <KScoreMark className="h-36 w-36 drop-shadow-[0_0_32px_rgba(37,99,235,0.18)] sm:h-40 sm:w-40 lg:h-44 lg:w-44" />
+            <KScoreWordmark
+              bold
+              alt="KSCORE"
+              className="w-[21rem] max-w-full drop-shadow-[0_0_28px_rgba(56,189,248,0.12)] sm:w-[28rem] lg:w-[34rem]"
+            />
           </h1>
           <p className="sr-only">Decentralized Agent Registry, Agent Explorer, Trust Registry, and Custom Verification.</p>
 

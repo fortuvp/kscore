@@ -5,6 +5,7 @@ import { Bot, ChevronDown, Menu } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { KScoreLogo } from "@/components/brand/kscore-logo";
 import { useVerificationEnvironment } from "@/components/verification-environment-provider";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -123,9 +124,15 @@ export function Navbar() {
 
 function Brand({ href, className = "" }: { href: string; className?: string }) {
   return (
-    <Link href={href} className={`flex shrink-0 items-baseline font-semibold tracking-[-0.025em] ${className}`}>
-      <span className="bg-gradient-to-r from-cyan-300 to-cyan-400 bg-clip-text text-[17px] text-transparent">K</span>
-      <span className="text-[17px] text-white/90">SCORE</span>
+    <Link
+      href={href}
+      aria-label="KSCORE home"
+      className={`flex shrink-0 items-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/45 ${className}`}
+    >
+      <KScoreLogo
+        markClassName="h-6 w-6 sm:h-7 sm:w-7"
+        wordmarkClassName="h-3 w-auto sm:h-3.5"
+      />
     </Link>
   );
 }
