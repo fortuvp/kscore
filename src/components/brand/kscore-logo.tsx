@@ -9,9 +9,18 @@ export function KScoreMark({ alt = "", ...props }: React.ImgHTMLAttributes<HTMLI
 export function KScoreWordmark({
   alt = "",
   bold = false,
+  scoreOnly = false,
   ...props
-}: React.ImgHTMLAttributes<HTMLImageElement> & { bold?: boolean }) {
-  return <img src={bold ? "/brand/kscore-wordmark-bold.svg" : "/brand/kscore-wordmark.svg"} alt={alt} {...props} />;
+}: React.ImgHTMLAttributes<HTMLImageElement> & { bold?: boolean; scoreOnly?: boolean }) {
+  const src = scoreOnly
+    ? bold
+      ? "/brand/kscore-score-bold.svg"
+      : "/brand/kscore-score.svg"
+    : bold
+      ? "/brand/kscore-wordmark-bold.svg"
+      : "/brand/kscore-wordmark.svg";
+
+  return <img src={src} alt={alt} {...props} />;
 }
 
 export function KScoreLockup({ alt = "KSCORE", ...props }: React.ImgHTMLAttributes<HTMLImageElement>) {
@@ -30,7 +39,7 @@ export function KScoreLogo({
   return (
     <span className={`inline-flex items-center gap-1.5 ${className}`}>
       <KScoreMark className={markClassName} />
-      <KScoreWordmark className={wordmarkClassName} />
+      <KScoreWordmark scoreOnly className={wordmarkClassName} />
       <span className="sr-only">KSCORE</span>
     </span>
   );

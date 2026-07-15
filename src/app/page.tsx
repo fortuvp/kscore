@@ -191,12 +191,13 @@ export default function HomePage() {
 
       <main className="container mx-auto max-w-[1200px] px-5 py-12 sm:px-8 sm:py-16 lg:py-20">
         <section className="relative pb-8 pt-4 text-center sm:pt-8 lg:pt-12">
-          <h1 className="flex flex-col items-center gap-2 sm:gap-3">
-            <KScoreMark className="h-36 w-36 drop-shadow-[0_0_32px_rgba(37,99,235,0.18)] sm:h-40 sm:w-40 lg:h-44 lg:w-44" />
+          <h1 className="flex items-center justify-center gap-3 sm:gap-4">
+            <KScoreMark className="h-24 w-24 shrink-0 drop-shadow-[0_0_32px_rgba(37,99,235,0.18)] sm:h-32 sm:w-32 lg:h-36 lg:w-36" />
             <KScoreWordmark
               bold
+              scoreOnly
               alt="KSCORE"
-              className="w-[21rem] max-w-full drop-shadow-[0_0_28px_rgba(56,189,248,0.12)] sm:w-[28rem] lg:w-[34rem]"
+              className="w-[15rem] min-w-0 drop-shadow-[0_0_28px_rgba(56,189,248,0.12)] sm:w-[22rem] lg:w-[28rem]"
             />
           </h1>
           <p className="sr-only">Decentralized Agent Registry, Agent Explorer, Trust Registry, and Custom Verification.</p>
