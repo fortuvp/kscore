@@ -2,7 +2,7 @@ export type VerificationEnvironment = "testnet" | "mainnet";
 
 export const DEFAULT_VERIFICATION_ENVIRONMENT: VerificationEnvironment = "testnet";
 export const VERIFICATION_ENVIRONMENT_QUERY_PARAM = "verificationEnvironment";
-export const VERIFICATION_ENVIRONMENT_STORAGE_KEY = "dex8004.verificationEnvironment";
+export const VERIFICATION_ENVIRONMENT_STORAGE_KEY = "kscore.verificationEnvironment";
 
 const SEPOLIA_CHAIN_ID = 11155111;
 const ETHEREUM_CHAIN_ID = 1;
@@ -108,7 +108,7 @@ export function withVerificationEnvironment(
 
   try {
     const isAbsolute = /^[a-z][a-z\d+.-]*:\/\//i.test(href);
-    const url = new URL(href, "https://dex8004.local");
+    const url = new URL(href, "https://kscore.local");
     url.searchParams.set(VERIFICATION_ENVIRONMENT_QUERY_PARAM, environment);
     return isAbsolute ? url.toString() : `${url.pathname}${url.search}${url.hash}`;
   } catch {

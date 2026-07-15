@@ -38,7 +38,7 @@ const connectors = [
           projectId: wcProjectId,
           showQrModal: true,
           metadata: {
-            name: "DEX8004",
+            name: "KSCORE",
             description: "ERC-8004 Agents Explorer Demo",
             url: appOrigin,
             icons: [`${appOrigin}/favicon.ico`],

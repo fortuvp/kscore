@@ -15,7 +15,7 @@ import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "FAQ",
-  description: "Answers about DEX8004 verification, collateral, challenges, withdrawals, and agent integrations.",
+  description: "Answers about KSCORE verification, collateral, challenges, withdrawals, and agent integrations.",
 };
 
 type FaqGroup = {
@@ -115,7 +115,7 @@ const FAQ_GROUPS: FaqGroup[] = [
       {
         question: "Why can the same agent number appear on multiple chains?",
         answer:
-          "ERC-8004 agent numbers are scoped by their source registry. DEX8004 matches both the agent number and its CAIP-10 chain/account context so an identity on one chain is not confused with another.",
+          "ERC-8004 agent numbers are scoped by their source registry. KSCORE matches both the agent number and its CAIP-10 chain/account context so an identity on one chain is not confused with another.",
       },
       {
         question: "Which network selector does Verified Agents use?",

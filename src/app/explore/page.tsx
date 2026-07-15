@@ -342,7 +342,7 @@ export default function ExplorePage() {
 
       <main className="container mx-auto max-w-[1200px] px-5 py-12 sm:px-8 sm:py-16">
         <section className="mb-10">
-          <h1 className="text-4xl font-black tracking-tight text-white sm:text-5xl">Explore The DEX8004 Ecosystem</h1>
+          <h1 className="text-4xl font-black tracking-tight text-white sm:text-5xl">Explore The KSCORE Ecosystem</h1>
           <p className="mt-3 max-w-3xl text-lg text-white/75">
             Discover verified agents and review portable reputation before interacting.
           </p>

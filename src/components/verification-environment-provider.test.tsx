@@ -36,7 +36,7 @@ describe("VerificationEnvironmentProvider", () => {
   });
 
   it("restores a persisted environment", async () => {
-    window.localStorage.setItem("dex8004.verificationEnvironment", "mainnet");
+    window.localStorage.setItem("kscore.verificationEnvironment", "mainnet");
     render(<VerificationEnvironmentProvider><Harness /></VerificationEnvironmentProvider>);
     await waitFor(() => expect(screen.getByText("mainnet")).toBeInTheDocument());
   });
@@ -45,7 +45,7 @@ describe("VerificationEnvironmentProvider", () => {
     render(<VerificationEnvironmentProvider><Harness /></VerificationEnvironmentProvider>);
     fireEvent.click(screen.getByRole("button", { name: "Mainnet" }));
 
-    expect(window.localStorage.getItem("dex8004.verificationEnvironment")).toBe("mainnet");
+    expect(window.localStorage.getItem("kscore.verificationEnvironment")).toBe("mainnet");
     expect(window.location.search).toContain("verificationEnvironment=mainnet");
     expect(screen.getByText(/network=base&verificationEnvironment=mainnet/)).toBeInTheDocument();
     expect(wagmi.switchChain).toHaveBeenCalledWith({ chainId: 1 });

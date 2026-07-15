@@ -12,7 +12,7 @@ export function AgentSkillsGuide() {
     setEntryUrl(`${window.location.origin}/llms-full.txt`);
   }, []);
 
-  const prompt = `Read ${entryUrl} and follow it before interacting with DEX8004.`;
+  const prompt = `Read ${entryUrl} and follow it before interacting with KSCORE.`;
 
   async function copyPrompt() {
     await navigator.clipboard.writeText(prompt);
@@ -25,7 +25,7 @@ export function AgentSkillsGuide() {
       <section className="min-w-0">
         <h2 className="text-lg font-semibold tracking-tight text-white">Give your agent one instruction</h2>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-white/52">
-          This prompt loads the complete operating context published by the current DEX8004 deployment.
+          This prompt loads the complete operating context published by the current KSCORE deployment.
         </p>
         <div className="mt-4 rounded-xl border border-white/10 bg-[#090f17] p-3 sm:flex sm:items-center sm:gap-3 sm:p-4">
           <code className="block min-w-0 flex-1 [overflow-wrap:anywhere] font-mono text-[13px] leading-6 text-white/78">
@@ -55,7 +55,7 @@ export function AgentSkillsGuide() {
           <FileLink href="/.well-known/agent-skills/index.json" title="Discovery index" detail="Installable bundles" />
         </div>
         <p className="mt-4 border-t border-white/[0.08] pt-4 text-xs leading-5 text-white/38">
-          These local files add DEX8004 addresses and safeguards. They also route agents to the complete Kleros Skills package.
+          These local files add KSCORE addresses and safeguards. They also route agents to the complete Kleros Skills package.
         </p>
       </aside>
     </div>

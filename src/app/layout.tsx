@@ -20,8 +20,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "DEX8004 — Verifiable Trust for AI Agents",
-    template: "%s · DEX8004",
+    default: "KSCORE — Verifiable Trust for AI Agents",
+    template: "%s · KSCORE",
   },
   description: "Discover, collateralize, and evaluate ERC-8004 agents through open, Kleros-backed registries.",
 };
@@ -35,9 +35,9 @@ export default function RootLayout({
     <html lang="en" className="dark" suppressHydrationWarning>
       <head>
         <meta name="llms" content="/llms.txt" />
-        <link rel="alternate" type="text/markdown" href="/llms.txt" title="DEX8004 LLM index" />
-        <link rel="alternate" type="text/markdown" href="/llms-full.txt" title="DEX8004 complete agent guide" />
-        <link rel="agent-skill" type="text/markdown" href="/SKILL.md" title="DEX8004 agent skill" />
+        <link rel="alternate" type="text/markdown" href="/llms.txt" title="KSCORE LLM index" />
+        <link rel="alternate" type="text/markdown" href="/llms-full.txt" title="KSCORE complete agent guide" />
+        <link rel="agent-skill" type="text/markdown" href="/SKILL.md" title="KSCORE agent skill" />
       </head>
       <body
         className={`${appSans.variable} ${geistMono.variable} antialiased`}

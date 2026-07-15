@@ -192,9 +192,9 @@ export default function HomePage() {
         <section className="relative pb-8 pt-4 text-center sm:pt-8 lg:pt-12">
           <h1 className="text-balance text-6xl font-black tracking-[-0.04em] sm:text-7xl lg:text-8xl xl:text-[7.2rem]">
             <span className="bg-gradient-to-r from-cyan-300 via-cyan-200 to-cyan-400 bg-clip-text text-transparent drop-shadow-[0_0_40px_rgba(34,211,238,0.35)]">
-              DEX
+              K
             </span>
-            <span className="text-white/95">8004</span>
+            <span className="text-white/95">SCORE</span>
           </h1>
           <p className="sr-only">Decentralized Agent Registry, Agent Explorer, Trust Registry, and Custom Verification.</p>
 

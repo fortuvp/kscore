@@ -25,7 +25,10 @@ export async function GET(request: Request) {
           fontFamily: "sans-serif",
         }}
       >
-        <div style={{ fontSize: 28, opacity: 0.9 }}>DEX8004 Explorer</div>
+        <div style={{ display: "flex", alignItems: "baseline", fontSize: 28, fontWeight: 700 }}>
+          <span style={{ color: "#67e8f9" }}>K</span>
+          <span style={{ color: "rgba(255,255,255,0.9)" }}>SCORE Explorer</span>
+        </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ fontSize: 64, lineHeight: 1.05, fontWeight: 800, maxWidth: 980 }}>{title}</div>
           <div style={{ fontSize: 30, opacity: 0.85 }}>{subtitle}</div>

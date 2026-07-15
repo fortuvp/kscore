@@ -32,7 +32,7 @@ Anyone may submit a candidate or challenge one with evidence. Treat inclusion as
 
 ## Economic context
 
-- A submitter may collateralize more than `submissionMinDeposit()`. On DEX8004, more collateral can improve placement in stake-ranked views and signal confidence, but it does not prove compliance or guarantee trust, usage, or clients. The full stake is exposed to a valid challenge.
+- A submitter may collateralize more than `submissionMinDeposit()`. On KSCORE, more collateral can improve placement in stake-ranked views and signal confidence, but it does not prove compliance or guarantee trust, usage, or clients. The full stake is exposed to a valid challenge.
 - Anyone may challenge a non-compliant item. A successful challenger may earn collateral under the live PGTCR rules; an unsuccessful challenger can lose stake and incur arbitration and gas costs. Never present challenging as guaranteed profit.
 - A voluntary, unchallenged two-step withdrawal returns **100% of the recorded ERC20 item stake and recorded native arbitration deposit** to the submitter after the live `withdrawingPeriod`. Gas and upload costs are not refunded, and an unresolved or successful challenge can delay or prevent that recovery. Verify the deployed implementation and simulate before promising an amount.
 

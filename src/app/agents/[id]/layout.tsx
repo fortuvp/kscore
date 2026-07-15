@@ -7,7 +7,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { id } = await params;
   const short = id.length > 28 ? `${id.slice(0, 28)}...` : id;
-  const title = `Agent ${short} | DEX8004 Explorer`;
+  const title = `Agent ${short} | KSCORE Explorer`;
   const og = `/api/og?title=${encodeURIComponent(`Agent ${short}`)}&subtitle=${encodeURIComponent(
     "ERC-8004 trust profile"
   )}`;

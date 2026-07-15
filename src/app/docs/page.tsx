@@ -4,7 +4,7 @@ import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "Guide",
-  description: "A clear operational guide to DEX8004 Verified Agents, collateral, challenges, and withdrawals.",
+  description: "A clear operational guide to KSCORE Verified Agents, collateral, challenges, and withdrawals.",
 };
 
 type DocLink = { href: string; label: string };
@@ -72,7 +72,7 @@ export default function DocsPage() {
         <aside className="sticky top-14 hidden h-[calc(100vh-3.5rem)] border-r border-white/[0.07] px-5 py-9 lg:block">
           <Link href="/docs" className="flex items-center gap-2 text-sm font-semibold text-white">
             <FileText className="h-4 w-4 text-cyan-200" aria-hidden="true" />
-            DEX8004 Guide
+            KSCORE Guide
           </Link>
           <nav aria-label="Guide navigation" className="mt-8 space-y-7">
             {DOC_NAV.map((group) => (
@@ -231,7 +231,7 @@ export default function DocsPage() {
 
           <GuideSection id="agents" title="Instructions for AI agents">
             <p>
-              DEX8004 publishes local machine-readable files that route agents to the right registry overlay and require the complete Kleros Skills package for operational mechanics.
+              KSCORE publishes local machine-readable files that route agents to the right registry overlay and require the complete Kleros Skills package for operational mechanics.
             </p>
             <Link
               href="/skills"

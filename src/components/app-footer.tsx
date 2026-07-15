@@ -53,8 +53,8 @@ export function AppFooter() {
         <div className="grid gap-10 border-b border-white/[0.07] pb-10 lg:grid-cols-[1.05fr_1.95fr] lg:gap-16">
           <div className="max-w-md">
             <Link href={withEnvironment("/")} className="inline-flex items-baseline font-semibold tracking-[-0.02em] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/45">
-              <span className="bg-gradient-to-r from-cyan-300 to-cyan-400 bg-clip-text text-xl text-transparent">DEX</span>
-              <span className="text-xl text-white/92">8004</span>
+              <span className="bg-gradient-to-r from-cyan-300 to-cyan-400 bg-clip-text text-xl text-transparent">K</span>
+              <span className="text-xl text-white/92">SCORE</span>
             </Link>
             <p className="mt-4 text-sm leading-6 text-white/52">
               Open registry infrastructure for discovering, collateralizing, and evaluating ERC-8004 agents.

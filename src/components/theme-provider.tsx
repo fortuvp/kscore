@@ -13,7 +13,7 @@ export function ThemeProvider({
       defaultTheme="dark"
       enableSystem={false}
       forcedTheme="dark"
-      storageKey="dex8004-theme"
+      storageKey="kscore-theme"
     >
       {children}
     </NextThemesProvider>

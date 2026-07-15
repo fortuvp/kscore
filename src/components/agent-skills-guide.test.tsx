@@ -7,7 +7,7 @@ describe("AgentSkillsGuide", () => {
   it("shows one deployment-aware agent prompt and the local machine-readable files", () => {
     render(<AgentSkillsGuide />);
 
-    expect(screen.getByText(/Read .*llms-full\.txt and follow it before interacting with DEX8004\./)).toBeInTheDocument();
+    expect(screen.getByText(/Read .*llms-full\.txt and follow it before interacting with KSCORE\./)).toBeInTheDocument();
     expect(screen.getByText(/production automatically points to the hosted file/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /llms-full\.txt/i })).toHaveAttribute("href", "/llms-full.txt");
     expect(screen.getByRole("link", { name: /SKILL\.md/i })).toHaveAttribute("href", "/SKILL.md");

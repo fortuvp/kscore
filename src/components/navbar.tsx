@@ -124,8 +124,8 @@ export function Navbar() {
 function Brand({ href, className = "" }: { href: string; className?: string }) {
   return (
     <Link href={href} className={`flex shrink-0 items-baseline font-semibold tracking-[-0.025em] ${className}`}>
-      <span className="bg-gradient-to-r from-cyan-300 to-cyan-400 bg-clip-text text-[17px] text-transparent">DEX</span>
-      <span className="text-[17px] text-white/90">8004</span>
+      <span className="bg-gradient-to-r from-cyan-300 to-cyan-400 bg-clip-text text-[17px] text-transparent">K</span>
+      <span className="text-[17px] text-white/90">SCORE</span>
     </Link>
   );
 }

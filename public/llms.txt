@@ -1,4 +1,4 @@
-# DEX8004 Verified Agents
+# KSCORE Verified Agents
 
 > Agent-readable routing and safety overlay for two permissionless, policy-governed Stake Curate / PermanentGTCR / PGTCR registries.
 
@@ -11,7 +11,7 @@ Install or load the complete current Kleros Skills package before any registry o
 - Curate operations: https://github.com/kleros/kleros-skills/blob/master/kleros-curate/SKILL.md
 - Stake Curate operations: https://github.com/kleros/kleros-skills/blob/master/kleros-curate/references/stake-curate.md
 
-Use the upstream package for operational Kleros mechanics. Use the DEX8004 skills below as the fixed-registry overlay for addresses, ERC-8004 source identity, duplicate prevention, status language, economics, and policy safeguards. This mirrors the context-overlay pattern of https://github.com/kleros/kleros-skills/blob/master/kleros-curate/references/scout-registries.md, but Verified Agents is PGTCR—not Scout or Light Curate.
+Use the upstream package for operational Kleros mechanics. Use the KSCORE skills below as the fixed-registry overlay for addresses, ERC-8004 source identity, duplicate prevention, status language, economics, and policy safeguards. This mirrors the context-overlay pattern of https://github.com/kleros/kleros-skills/blob/master/kleros-curate/references/scout-registries.md, but Verified Agents is PGTCR—not Scout or Light Curate.
 
 ## Registry skills
 

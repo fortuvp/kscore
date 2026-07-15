@@ -1,8 +1,8 @@
-# DEX8004
+# KSCORE
 
 [ERC-8004](https://8004.org) · [Registration Guide](https://github.com/erc-8004/best-practices/blob/main/Registration.md) · [Reputation Guide](https://github.com/erc-8004/best-practices/blob/main/Reputation.md) · [Agent0 SDK](https://sdk.ag0.xyz/)
 
-[![Project](https://img.shields.io/badge/Project-DEX8004-cyan)](#)
+[![Project](https://img.shields.io/badge/Project-KSCORE-cyan)](#)
 
 ---
 

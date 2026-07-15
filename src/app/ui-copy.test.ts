@@ -31,7 +31,7 @@ describe("requested UI copy and navigation", () => {
     expect(docs).toContain("A scoped signal—not a universal endorsement");
     expect(docs).toContain('href="/skills"');
     expect(skills).toContain("Guide &amp; Skills");
-    expect(skillsGuide).toContain("Read ${entryUrl} and follow it before interacting with DEX8004.");
+    expect(skillsGuide).toContain("Read ${entryUrl} and follow it before interacting with KSCORE.");
     expect(skillsGuide).toContain("/llms-full.txt");
     expect(faq).toContain("Removed means a successful challenge and dispute");
     expect(faq).toContain("unchallenged voluntary withdrawal returns the locked stake");

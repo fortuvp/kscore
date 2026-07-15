@@ -6,7 +6,7 @@ import { AgentSkillsGuide } from "@/components/agent-skills-guide";
 
 export const metadata: Metadata = {
   title: "Skills",
-  description: "Local machine-readable instructions for AI agents using DEX8004 Verified Agents.",
+  description: "Local machine-readable instructions for AI agents using KSCORE Verified Agents.",
 };
 
 export default function SkillsPage() {
