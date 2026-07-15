@@ -54,10 +54,10 @@ export default function LaunchPage() {
             Build a standard the market can trust
           </h1>
           <p className="mx-auto mt-6 max-w-3xl text-lg leading-relaxed text-white/70">
-            Define what agents must prove, issue a recognizable verification badge, and let products check it before granting access, credentials, or preferred terms.
+            Define what agents must prove, launch the verification check it before granting access credentials, a badge or preferred terms.
           </p>
           <p className="mx-auto mt-3 max-w-3xl text-sm font-medium text-white/90">
-            Your evidence. Your reviewers. Your badge.
+            Your requirements. Your reviewers. Your badge.
           </p>
           <div className="mt-8">
             <Button type="button" size="lg" className="bg-cyan-300 text-[#041014] hover:bg-cyan-200">
