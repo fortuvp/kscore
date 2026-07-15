@@ -4,10 +4,13 @@ import * as React from "react";
 import {
   BadgeCheck,
   Building2,
+  Gauge,
   Landmark,
   ListChecks,
   LockKeyhole,
+  Megaphone,
   Network,
+  RefreshCw,
   SlidersHorizontal,
   TrendingUp,
 } from "lucide-react";
@@ -26,7 +29,7 @@ const BADGE_EXAMPLES = [
 
 const LIST_PREVIEW = [
   { name: "Payment Operator", criteria: "KYB + policy", tone: "text-cyan-200" },
-  { name: "Trading Strategist", criteria: "Risk tested", tone: "text-emerald-200" },
+  { name: "Trading Strategist", criteria: "Min 0.7 WETH collateral", tone: "text-emerald-200" },
   { name: "High quality auditors", criteria: "Audit standard", tone: "text-amber-200" },
 ] as const;
 
@@ -68,7 +71,7 @@ export default function LaunchPage() {
           <div className="mx-auto mt-12 max-w-3xl border border-white/12 bg-black/25 text-left">
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
               <span className="text-xs font-semibold uppercase text-white/55">Verified agent lists</span>
-              <Badge className="border-emerald-400/25 bg-emerald-400/10 text-emerald-200">AVAILABLE BADGES</Badge>
+              <Badge className="border-emerald-400/25 bg-emerald-400/10 text-emerald-200">REQUIREMENTS</Badge>
             </div>
             {LIST_PREVIEW.map((agent, index) => (
               <div key={agent.name} className="flex items-center gap-3 border-b border-white/8 px-4 py-3 last:border-b-0">
@@ -123,6 +126,40 @@ export default function LaunchPage() {
           </div>
         </section>
 
+        <section className="relative overflow-hidden border-y border-white/10 py-14 sm:py-20">
+          <div className="pointer-events-none absolute -right-32 top-1/2 h-80 w-80 -translate-y-1/2 rounded-full bg-cyan-300/[0.06] blur-3xl" />
+          <div className="relative grid gap-10 lg:grid-cols-[0.72fr_1.28fr] lg:gap-16">
+            <div className="max-w-md">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-200">
+                <TrendingUp className="h-4 w-4" />
+                Compounding value
+              </div>
+              <h2 className="mt-4 text-3xl font-semibold leading-tight sm:text-4xl">Turn Trust Into Growth</h2>
+              <p className="mt-5 text-base leading-relaxed text-white/65">
+                Cut due diligence costs while verifying more agents than anyone else.
+              </p>
+            </div>
+
+            <div className="divide-y divide-white/10">
+              <GrowthPoint
+                icon={Megaphone}
+                title="Boost participation"
+                copy="Verified agents become ambassadors for your standard across the ecosystem."
+              />
+              <GrowthPoint
+                icon={Gauge}
+                title="Become the standard agents choose"
+                copy="Agents choose you because verification is transparent, predictable, and fast."
+              />
+              <GrowthPoint
+                icon={RefreshCw}
+                title="Keep compliance current"
+                copy="Update your terms and agents can adapt themselves—without adding operational risk for you."
+              />
+            </div>
+          </div>
+        </section>
+
         <section className="flex flex-col gap-6 border-t border-white/10 py-12 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-2xl font-semibold">Turn your policy into a badge products can trust</h2>
@@ -166,6 +203,28 @@ function Benefit({
       </div>
       <h3 className="mt-6 text-lg font-semibold">{title}</h3>
       <p className="mt-2 text-sm leading-relaxed text-white/60">{copy}</p>
+    </div>
+  );
+}
+
+function GrowthPoint({
+  icon: Icon,
+  title,
+  copy,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  copy: string;
+}) {
+  return (
+    <div className="group grid gap-4 py-7 first:pt-0 last:pb-0 sm:grid-cols-[3rem_1fr] sm:gap-5">
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-cyan-300/[0.07] text-cyan-200 ring-1 ring-inset ring-cyan-300/15 transition-colors duration-300 group-hover:bg-cyan-300/[0.12] group-hover:ring-cyan-300/30">
+        <Icon className="h-4.5 w-4.5" />
+      </div>
+      <div>
+        <h3 className="text-lg font-semibold">{title}</h3>
+        <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/60">{copy}</p>
+      </div>
     </div>
   );
 }
