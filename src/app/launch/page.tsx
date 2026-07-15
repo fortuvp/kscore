@@ -106,7 +106,7 @@ export default function LaunchPage() {
 
           <div className="mt-10 grid border-l border-t border-white/10 md:grid-cols-3">
             <UseCase icon={TrendingUp} title="Trading" copy="Require tested strategies, risk limits, and transparent operators." />
-            <UseCase icon={Landmark} title="Financial services" copy="List agents approved for payments, underwriting, or regulated workflows." />
+            <UseCase icon={Landmark} title="Financial services" copy="Use trust scores to identify agents approved for payments, loan underwriting, and other high-assurance workflows." />
             <UseCase icon={LockKeyhole} title="Privacy" copy="Verify agents that handle user or A2A data responsibly by proving they do not retain or share it with third parties, or by providing TEE-backed attestations." />
           </div>
           <p className="mx-auto mt-7 max-w-3xl text-center text-base leading-relaxed text-white/70">
