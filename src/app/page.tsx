@@ -6,7 +6,6 @@ import {
   Activity,
   ArrowRight,
   BadgeCheck,
-  ChevronRight,
   HandCoins,
   Loader2,
   MessageSquareText,
@@ -16,7 +15,7 @@ import {
 import { formatUnits } from "viem";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { KScoreMark, KScoreWordmark } from "@/components/brand/kscore-logo";
+import { KScoreLogo } from "@/components/brand/kscore-logo";
 import { type AgentSubgraphNetwork } from "@/lib/agent-networks";
 import { useVerificationEnvironment } from "@/components/verification-environment-provider";
 
@@ -42,13 +41,6 @@ type HighlightsResponse = {
     answer: "YES" | "NO" | "UNKNOWN" | "OPEN";
   }>;
 };
-
-const HERO_DESCRIPTORS = [
-  "Agent Registry",
-  "Agent Explorer",
-  "Trust Registry",
-  "Custom Verification",
-] as const;
 
 const STATIC_HISTORY_ROWS = [
   {
@@ -90,12 +82,6 @@ export default function HomePage() {
   const [highlights, setHighlights] = React.useState<HighlightsResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
 
-  const [prefersReducedMotion, setPrefersReducedMotion] = React.useState(false);
-  const [descriptorIndex, setDescriptorIndex] = React.useState(0);
-  const [descriptorPaused, setDescriptorPaused] = React.useState(false);
-  const [descriptorVisible, setDescriptorVisible] = React.useState(true);
-  const fadeTimeoutRef = React.useRef<number | null>(null);
-
   const load = React.useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
@@ -117,35 +103,6 @@ export default function HomePage() {
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
-
-  React.useEffect(() => {
-    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const sync = () => setPrefersReducedMotion(media.matches);
-    sync();
-    media.addEventListener("change", sync);
-    return () => media.removeEventListener("change", sync);
-  }, []);
-
-  React.useEffect(() => {
-    if (prefersReducedMotion || descriptorPaused) return;
-
-    const interval = window.setInterval(() => {
-      setDescriptorVisible(false);
-      if (fadeTimeoutRef.current !== null) window.clearTimeout(fadeTimeoutRef.current);
-      fadeTimeoutRef.current = window.setTimeout(() => {
-        setDescriptorIndex((current) => (current + 1) % HERO_DESCRIPTORS.length);
-        setDescriptorVisible(true);
-      }, 180);
-    }, 2000);
-
-    return () => {
-      window.clearInterval(interval);
-      if (fadeTimeoutRef.current !== null) {
-        window.clearTimeout(fadeTimeoutRef.current);
-        fadeTimeoutRef.current = null;
-      }
-    };
-  }, [descriptorPaused, prefersReducedMotion]);
 
   const highestStakeAgents = React.useMemo(() => {
     const rows = [...(highlights?.verifiedAgents || [])];
@@ -190,60 +147,33 @@ export default function HomePage() {
       <div className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(24deg,rgba(16,185,129,0.06)_0%,transparent_35%)]" />
 
       <main className="container mx-auto max-w-[1200px] px-5 py-12 sm:px-8 sm:py-16 lg:py-20">
-        <section className="relative pb-8 pt-4 text-center sm:pt-8 lg:pt-12">
-          <h1 className="flex items-center justify-center gap-3 sm:gap-4">
-            <KScoreMark className="h-24 w-24 shrink-0 drop-shadow-[0_0_32px_rgba(37,99,235,0.18)] sm:h-32 sm:w-32 lg:h-36 lg:w-36" />
-            <KScoreWordmark
-              bold
-              scoreOnly
-              alt="KSCORE"
-              className="w-[15rem] min-w-0 drop-shadow-[0_0_28px_rgba(56,189,248,0.12)] sm:w-[22rem] lg:w-[28rem]"
+        <section className="pb-16 pt-8 sm:pb-20 sm:pt-12 lg:pb-24 lg:pt-16">
+          <div className="mx-auto max-w-5xl text-center">
+            <KScoreLogo
+              className="justify-center opacity-80"
+              markClassName="h-6 w-6 sm:h-7 sm:w-7"
+              wordmarkClassName="h-3 w-auto sm:h-3.5"
             />
-          </h1>
-          <p className="sr-only">Decentralized Agent Registry, Agent Explorer, Trust Registry, and Custom Verification.</p>
 
-          {prefersReducedMotion ? (
-            <div className="mt-8 h-12">
-              <div className="flex h-full flex-wrap items-center justify-center gap-2 text-xl sm:text-2xl">
-                <span className="font-light text-white/50">Decentralized</span>
-                {HERO_DESCRIPTORS.map((descriptor) => (
-                  <span
-                    key={descriptor}
-                    className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-3 py-1 text-sm font-light text-cyan-200"
-                  >
-                    {descriptor}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div
-              className="mt-8 h-12"
-              onMouseEnter={() => setDescriptorPaused(true)}
-              onMouseLeave={() => setDescriptorPaused(false)}
-            >
-              <div className="flex h-full items-center justify-center gap-3 text-xl sm:text-2xl">
-                <span className="font-light text-white/50">Decentralized</span>
-                <ChevronRight className="h-5 w-5 text-white/25" />
-                <span
-                  className={`font-light text-cyan-200 transition-all duration-200 ${
-                    descriptorVisible ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0"
-                  }`}
-                >
-                  {HERO_DESCRIPTORS[descriptorIndex]}
-                </span>
-              </div>
-            </div>
-          )}
+            <h1 className="mt-10 text-[clamp(3.25rem,8vw,6.75rem)] font-black leading-[0.94] tracking-[-0.065em] text-white sm:mt-12">
+              The trust layer for AI agents.
+            </h1>
+          </div>
 
-          <h2 className="mx-auto mt-10 max-w-4xl px-2 text-center text-lg font-normal leading-relaxed tracking-[-0.01em] text-white/70 sm:px-0 sm:text-xl">
-            Discover agents, verify claims, and build portable trust through open registries and transparent dispute resolution.
-          </h2>
+          <div className="mx-auto mt-14 space-y-5 text-center sm:mt-16 sm:space-y-6">
+            <h2 className="text-[clamp(1.35rem,2.25vw,1.85rem)] font-medium leading-[1.35] tracking-[-0.025em] text-white/58 lg:whitespace-nowrap">
+              <span className="text-cyan-200">Platforms</span> set{" "}
+              <span className="text-cyan-200">standards</span> to prevent malicious activity.
+            </h2>
 
-          <div className="mx-auto mt-16 h-px w-full max-w-4xl bg-gradient-to-r from-transparent via-white/15 to-transparent" />
+            <h2 className="text-[clamp(1.35rem,2.25vw,1.85rem)] font-medium leading-[1.35] tracking-[-0.025em] text-white/58 lg:whitespace-nowrap">
+              <span className="text-emerald-200">Agents</span> earn verifiable credentials that boost{" "}
+              <span className="text-emerald-200">discoverability and usage</span>.
+            </h2>
+          </div>
         </section>
 
-        <section className="mt-32 grid items-center gap-14 lg:grid-cols-[0.88fr_1.12fr] lg:gap-20">
+        <section className="mt-24 grid items-center gap-14 lg:grid-cols-[0.88fr_1.12fr] lg:gap-20">
           <div className="relative rounded-lg border border-emerald-300/20 bg-[#07171a]/80 p-5 shadow-[0_24px_60px_rgba(0,0,0,0.45)] backdrop-blur-sm">
             <div className="mb-4 flex items-center justify-between border-b border-emerald-300/18 pb-3">
               <div className="flex items-center gap-2">
