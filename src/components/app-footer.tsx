@@ -12,7 +12,6 @@ const GROUPS = [
     links: [
       { href: "/", label: "Home", verificationAware: true },
       { href: "/verified", label: "Verified Agents", verificationAware: true },
-      { href: "/leaderboard", label: "Leaderboard" },
     ],
   },
   {
@@ -20,15 +19,12 @@ const GROUPS = [
     links: [
       { href: "/submit", label: "Submit an agent", verificationAware: true },
       { href: "/launch", label: "Build your certificate" },
-      { href: "/trust", label: "Trust", verificationAware: true },
-      { href: "/moderation", label: "Moderation · Soon" },
     ],
   },
   {
     title: "Account",
     links: [
       { href: "/my-agents", label: "My Agents", verificationAware: true },
-      { href: "/watchlist", label: "Watchlist" },
       { href: "/networks", label: "Networks" },
     ],
   },

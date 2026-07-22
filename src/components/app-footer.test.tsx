@@ -23,6 +23,10 @@ describe("AppFooter", () => {
     );
     expect(screen.queryByText("Compare")).not.toBeInTheDocument();
     expect(screen.queryByText("Explore")).not.toBeInTheDocument();
+    expect(screen.queryByText("Leaderboard")).not.toBeInTheDocument();
+    expect(screen.queryByText("Trust")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Moderation/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Watchlist")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Build your certificate" })).toHaveAttribute("href", "/launch");
     expect(screen.getByRole("link", { name: "Skills" })).toHaveAttribute("href", "/skills");
     expect(screen.queryByRole("link", { name: /Source code/i })).not.toBeInTheDocument();
