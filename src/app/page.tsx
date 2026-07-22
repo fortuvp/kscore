@@ -15,7 +15,6 @@ import {
 import { formatUnits } from "viem";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { KScoreLogo } from "@/components/brand/kscore-logo";
 import { type AgentSubgraphNetwork } from "@/lib/agent-networks";
 import { useVerificationEnvironment } from "@/components/verification-environment-provider";
 
@@ -149,13 +148,7 @@ export default function HomePage() {
       <main className="container mx-auto max-w-[1200px] px-5 py-12 sm:px-8 sm:py-16 lg:py-20">
         <section className="pb-16 pt-8 sm:pb-20 sm:pt-12 lg:pb-24 lg:pt-16">
           <div className="mx-auto max-w-5xl text-center">
-            <KScoreLogo
-              className="justify-center opacity-80"
-              markClassName="h-6 w-6 sm:h-7 sm:w-7"
-              wordmarkClassName="h-3 w-auto sm:h-3.5"
-            />
-
-            <h1 className="mt-10 text-[clamp(3.25rem,8vw,6.75rem)] font-black leading-[0.94] tracking-[-0.065em] text-white sm:mt-12">
+            <h1 className="text-[clamp(3.25rem,8vw,6.75rem)] font-black leading-[0.94] tracking-[-0.065em] text-white">
               The trust layer for AI agents.
             </h1>
           </div>
@@ -380,7 +373,7 @@ export default function HomePage() {
 
           <div className="mt-7 flex justify-center">
             <Button asChild className="border border-cyan-200/45 bg-cyan-200/18 px-6 text-white hover:bg-cyan-200/28">
-              <Link href={withEnvironment("/trust")}>
+              <Link href={withEnvironment("/verified")}>
                 Analyze
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
@@ -392,11 +385,14 @@ export default function HomePage() {
           <div className="relative overflow-hidden rounded-lg border border-cyan-300/15 bg-[#02060d]/82 p-8 text-center shadow-[0_22px_70px_rgba(0,0,0,0.4)] sm:p-12">
             <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(34,211,238,0.12)_0%,rgba(34,211,238,0.04)_34%,transparent_70%)]" />
             <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(130deg,transparent_0%,rgba(34,211,238,0.08)_54%,transparent_100%)]" />
+            <div className="relative mb-7 text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200/75">
+              Want to create a certificate on your own terms?
+            </div>
             <h3 className="relative text-2xl font-black tracking-[-0.02em] text-white sm:text-3xl">
-              Define what verified means for your market
+              Define what verified means for your customers
             </h3>
             <p className="relative mx-auto mt-6 max-w-4xl text-base text-white/85 sm:text-lg">
-              Set your own criteria, issue a trusted badge, and create a standard that products can use to grant access or privileges.
+              Set your own criteria, issue a trusted badge, and create a certificate to grant access, privileges or just promote your brand.
             </p>
             <div className="relative mt-7">
               <Button asChild className="border border-cyan-200/40 bg-cyan-200/18 text-white hover:bg-cyan-200/28">

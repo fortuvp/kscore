@@ -28,6 +28,16 @@ describe("requested UI copy and navigation", () => {
     expect(launch).toContain("Agents pursue your certificate because it is fair, fast, and boosts their discoverability.");
   });
 
+  it("routes homepage analysis to verified agents and promotes customer-defined certificates", () => {
+    const home = source("src/app/page.tsx");
+
+    expect(home).toContain('<Link href={withEnvironment("/verified")}>');
+    expect(home).not.toContain('<Link href={withEnvironment("/trust")}>');
+    expect(home).toContain("Want to create a certificate on your own terms?");
+    expect(home).toContain("Define what verified means for your customers");
+    expect(home).toContain("create a certificate to grant access, privileges or just promote your brand");
+  });
+
   it("uses direct report language for collateralized agents", () => {
     const reportDialog = source("src/components/pgtcr/challenge-agent-dialog.tsx");
 
@@ -74,8 +84,10 @@ describe("requested UI copy and navigation", () => {
     const skills = source("src/app/skills/page.tsx");
     const skillsGuide = source("src/components/agent-skills-guide.tsx");
 
-    expect(docs).toContain("Signing sequence");
-    expect(docs).toContain("A scoped signal, not a universal endorsement");
+    expect(docs).toContain("KSCORE step-by-step guide");
+    expect(docs).toContain("Press <strong>Submit your agent</strong>");
+    expect(docs).toContain("<strong>Report abuse</strong>");
+    expect(docs).toContain("Press <strong>Start withdraw</strong>");
     expect(docs).toContain('href="/skills"');
     expect(skills).toContain("Guide &amp; Skills");
     expect(skillsGuide).toContain("Read ${entryUrl} and follow it before interacting with KSCORE.");
@@ -83,6 +95,14 @@ describe("requested UI copy and navigation", () => {
     expect(faq).toContain("Removed means a successful challenge and dispute");
     expect(faq).toContain("unchallenged voluntary withdrawal returns the locked stake");
     expect(faq).toContain("Challenging is not guaranteed profit");
+  });
+
+  it("shows the KSCORE brand only in the homepage header", () => {
+    const home = source("src/app/page.tsx");
+
+    expect(home).not.toContain('import { KScoreLogo }');
+    expect(home).not.toContain("<KScoreLogo");
+    expect(home).toContain("The trust layer for AI agents.");
   });
 
   it("provides a keyboard skip link across the app", () => {

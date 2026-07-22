@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { ArrowRight, Bot, Check, ChevronRight, CircleAlert, FileText, Gavel, ShieldCheck } from "lucide-react";
+import { ArrowRight, ChevronRight, FileText } from "lucide-react";
 import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "Guide",
-  description: "A clear operational guide to KSCORE Verified Agents, collateral, challenges, and withdrawals.",
+  description: "Step-by-step instructions for finding, submitting, reporting, and withdrawing KSCORE agents.",
 };
 
 type DocLink = { href: string; label: string };
@@ -14,8 +14,8 @@ const DOC_NAV: readonly DocNavGroup[] = [
   {
     title: "Get started",
     links: [
-      { href: "#overview", label: "Overview" },
-      { href: "#verification", label: "How verification works" },
+      { href: "#overview", label: "Choose a task" },
+      { href: "#find", label: "Find an agent" },
       { href: "#statuses", label: "Status reference" },
     ],
   },
@@ -23,15 +23,15 @@ const DOC_NAV: readonly DocNavGroup[] = [
     title: "Workflows",
     links: [
       { href: "#submit", label: "Submit an agent" },
-      { href: "#withdraw", label: "Withdraw safely" },
-      { href: "#challenge", label: "Challenge a listing" },
+      { href: "#report", label: "Report abuse" },
+      { href: "#withdraw", label: "Withdraw collateral" },
     ],
   },
   {
     title: "Integrate",
     links: [
-      { href: "#standards", label: "Build a standard" },
-      { href: "#agents", label: "AI agent instructions" },
+      { href: "#certificate", label: "Build a certificate" },
+      { href: "#agents", label: "AI agent files" },
     ],
   },
 ];
@@ -42,26 +42,26 @@ const STATUS_ROWS = [
   {
     status: "Active",
     tone: "bg-emerald-300",
-    meaning: "Collateral is active and the listing currently complies with this registry’s policy.",
-    action: "Usable as a positive policy signal. Still verify the live status before granting access.",
+    meaning: "The listing is accepted and its collateral is active.",
+    action: "Open the agent page before use to confirm the status is still Active.",
   },
   {
     status: "In review",
     tone: "bg-amber-300",
-    meaning: "The listing is pending or challenged. Its compliance signal is unresolved.",
-    action: "Do not treat it as verified until the review or dispute ends.",
+    meaning: "The submission or an active report is unresolved.",
+    action: "Wait for the status to change before treating the agent as verified.",
   },
   {
     status: "Removed",
     tone: "bg-rose-300",
-    meaning: "A successful challenge and dispute found the listing non-compliant.",
-    action: "Do not grant privileges based on this verification.",
+    meaning: "A successful report removed the listing.",
+    action: "Do not treat the agent as verified.",
   },
   {
     status: "Withdrawn",
     tone: "bg-slate-400",
-    meaning: "The owner voluntarily left the list without an adverse ruling.",
-    action: "Treat it as no longer verified, not as proof of misconduct.",
+    meaning: "The owner completed a voluntary withdrawal.",
+    action: "Treat the agent as unverified without assuming misconduct.",
   },
 ] as const;
 
@@ -109,9 +109,9 @@ export default function DocsPage() {
           </nav>
 
           <div className="mt-6 border-b border-white/[0.08] pb-9">
-            <h1 className="text-3xl font-semibold tracking-[-0.035em] text-white sm:text-4xl">Verified Agents guide</h1>
+            <h1 className="text-3xl font-semibold tracking-[-0.035em] text-white sm:text-4xl">KSCORE step-by-step guide</h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-white/58">
-              Understand exactly what the registry proves, how collateral and challenges work, and when it is safe to rely on a listing.
+              Choose a task, press the named button, and follow the wallet prompts shown on screen.
             </p>
           </div>
 
@@ -127,34 +127,26 @@ export default function DocsPage() {
             ))}
           </nav>
 
-          <GuideSection id="overview" title="The short version">
-            <p>
-              Verified Agents is a permissionless, collateralized registry governed by a public policy. Anyone may submit an agent. Anyone may challenge a listing that fails the criteria. Kleros resolves disputes when the parties disagree.
-            </p>
-            <Callout icon={ShieldCheck} title="A scoped signal, not a universal endorsement">
-              Active means the agent currently complies with this registry’s published policy. It does not guarantee every behavior, capability, or future action.
-            </Callout>
+          <GuideSection id="overview" title="Choose a task">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <TaskLink href="#find" label="Find an agent" />
+              <TaskLink href="#submit" label="Submit an agent" />
+              <TaskLink href="#report" label="Report abuse" />
+              <TaskLink href="#withdraw" label="Withdraw collateral" />
+            </div>
           </GuideSection>
 
-          <GuideSection id="verification" title="How verification works">
-            <ol className="mt-5 space-y-5">
-              <Step number="1" title="A policy defines the claim">
-                Criteria must be observable and evidence-based so submitters, challengers, and jurors can evaluate the same question.
-              </Step>
-              <Step number="2" title="The owner posts collateral">
-                The agent owner deposits at least the live minimum stake plus the arbitration fee deposit. Higher collateral can improve stake-ranked visibility, but never replaces compliance.
-              </Step>
-              <Step number="3" title="The listing remains challengeable">
-                A reviewer can challenge non-compliant behavior and submit evidence. If disputed, Kleros jurors apply the policy to that evidence.
-              </Step>
-              <Step number="4" title="Applications read the live result">
-                Products should grant privileges only while the listing is active and the policy matches the criteria they actually need.
-              </Step>
-            </ol>
+          <GuideSection id="find" title="Find or open an agent">
+            <ActionSteps>
+              <ActionStep number="1">Press <strong>Verified Agents</strong> in the header to open the collateral registry.</ActionStep>
+              <ActionStep number="2">Enter a name or number in <strong>Search by agent name or number</strong> to filter the registry results.</ActionStep>
+              <ActionStep number="3">Press an agent result to open its profile, current collateral, history, reviews, and registry status.</ActionStep>
+              <ActionStep number="4">If the agent is not listed, scroll to <strong>Direct agent lookup</strong>, enter its number and source network, then press <strong>View agent page</strong>.</ActionStep>
+            </ActionSteps>
+            <PrimaryLink href="/verified" label="Open Verified Agents" />
           </GuideSection>
 
           <GuideSection id="statuses" title="Status reference">
-            <p>Statuses describe the listing lifecycle. Read them literally and check the current on-chain state before making a high-stakes decision.</p>
             <div className="mt-5 overflow-hidden rounded-xl border border-white/[0.09]">
               {STATUS_ROWS.map((row, index) => (
                 <div
@@ -177,77 +169,48 @@ export default function DocsPage() {
           </GuideSection>
 
           <GuideSection id="submit" title="Submit an agent">
-            <p>The submission form reads the live policy, minimum stake, token, arbitration cost, and waiting period from the selected pGTCR registry.</p>
-            <div className="mt-5 rounded-xl border border-white/[0.09] bg-[#090f17] p-5">
-              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-cyan-200/70">Signing sequence</div>
-              <div className="mt-4 grid gap-5 sm:grid-cols-2">
-                <CompactStep number="1" title="Approve collateral">
-                  Authorize the registry to transfer the exact ERC-20 stake shown in the preview.
-                </CompactStep>
-                <CompactStep number="2" title="Submit the listing">
-                  Add the item with the native arbitration fee deposit attached.
-                </CompactStep>
-              </div>
-            </div>
-            <Callout icon={CircleAlert} title="Review before signing" tone="amber">
-              Confirm the agent identity, source chain, policy evidence, stake token, both amounts, registry address, and selected network in the preview.
-            </Callout>
+            <ActionSteps>
+              <ActionStep number="1">Press <strong>Submit your agent</strong> on the Verified Agents page to open the submission form.</ActionStep>
+              <ActionStep number="2">Select the agent source network, enter its ERC-8004 number, and press the load button to fill the registration fields.</ActionStep>
+              <ActionStep number="3">Connect the funding wallet, switch to the registry network shown in the form, and enter an ERC-20 stake at or above the displayed minimum.</ActionStep>
+              <ActionStep number="4">Review every field, open the linked policy, and check <strong>I have read the registry policy and reviewed every field</strong>.</ActionStep>
+              <ActionStep number="5">Press <strong>Submit on [network]</strong> to open the transaction preview with the stake, arbitration deposit, registry address, and item data.</ActionStep>
+              <ActionStep number="6">Press <strong>Start signing</strong>, approve the ERC-20 transfer if requested, confirm the submission transaction, then press <strong>Done</strong>.</ActionStep>
+            </ActionSteps>
+            <PrimaryLink href="/submit" label="Open submission form" />
           </GuideSection>
 
-          <GuideSection id="withdraw" title="Withdraw safely">
-            <p>
-              Withdrawal is a voluntary exit, not a finding of non-compliance. Start the withdrawal, monitor the listing during the live waiting period, then finalize it when the contract permits.
-            </p>
-            <ul className="mt-5 space-y-3">
-              <CheckItem>A finalized, voluntary, unchallenged withdrawal returns the recorded ERC-20 stake and native arbitration deposit.</CheckItem>
-              <CheckItem>The listing remains visible and challengeable during the waiting period.</CheckItem>
-              <CheckItem>Network gas and upload costs are separate and are not refunded.</CheckItem>
-              <CheckItem>A successful challenge can delay or prevent recovery.</CheckItem>
-            </ul>
+          <GuideSection id="report" title="Report abuse">
+            <ActionSteps>
+              <ActionStep number="1">Open an agent with active collateral and press <strong>Report abuse</strong>.</ActionStep>
+              <ActionStep number="2">Check the popup for the live ERC-20 report deposit, arbitration cost, and bounty paid if the report succeeds.</ActionStep>
+              <ActionStep number="3">Enter an evidence title, explain the violation, and attach a supporting file when needed.</ActionStep>
+              <ActionStep number="4">Press <strong>Read policy</strong>, review the criteria, and check the confirmation that a failed report loses the report deposit.</ActionStep>
+              <ActionStep number="5">Press <strong>Report</strong>, approve the ERC-20 deposit if requested, and confirm the wallet transaction.</ActionStep>
+            </ActionSteps>
           </GuideSection>
 
-          <GuideSection id="challenge" title="Challenge a listing">
-            <p>
-              Challenge only when durable evidence shows a specific policy violation. A correct challenger may earn collateral; an incorrect challenger can lose their deposit and pay fees.
-            </p>
-            <Callout icon={Gavel} title="Evidence should be reproducible">
-              Tie every claim to a policy clause. Include timestamps, agent identifiers, repeatable tests, and stable content-addressed files when possible. Challenging is never guaranteed profit.
-            </Callout>
+          <GuideSection id="withdraw" title="Withdraw collateral">
+            <ActionSteps>
+              <ActionStep number="1">Connect the wallet that funded the listing and open the agent profile on the registry network.</ActionStep>
+              <ActionStep number="2">Press <strong>Start withdraw</strong>, read the displayed waiting period, then press <strong>Start withdraw</strong> again and confirm the wallet transaction.</ActionStep>
+              <ActionStep number="3">Return after the waiting period ends and press <strong>Execute withdrawal</strong> to submit the final transaction.</ActionStep>
+              <ActionStep number="4">After confirmation, the listing becomes Withdrawn and the contract returns the recorded ERC-20 stake and native arbitration deposit if no report succeeded.</ActionStep>
+            </ActionSteps>
           </GuideSection>
 
-          <GuideSection id="standards" title="Build a verification standard">
-            <p>Anything can be verified when the criteria are specific enough for independent reviewers to reach the same conclusion.</p>
-            <ul className="mt-5 space-y-3">
-              <CheckItem>State exactly what behavior or capability passes.</CheckItem>
-              <CheckItem>Define accepted evidence, exclusions, and a clear failure condition.</CheckItem>
-              <CheckItem>Set economics that make dishonest submissions costly and useful review worthwhile.</CheckItem>
-              <CheckItem>Grant application privileges only while the agent remains active.</CheckItem>
-            </ul>
-            <Link href="/launch" className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-cyan-200 transition hover:text-cyan-100">
-              Build your standard
-              <ArrowRight className="h-4 w-4" aria-hidden="true" />
-            </Link>
+          <GuideSection id="certificate" title="Build a certificate">
+            <p>Press <strong>Build a Certificate</strong> in the header to open the certificate overview; custom certificate deployment is not live yet.</p>
+            <PrimaryLink href="/launch" label="Open certificate overview" />
           </GuideSection>
 
-          <GuideSection id="agents" title="Instructions for AI agents">
-            <p>
-              KSCORE publishes local machine-readable files that route agents to the right registry overlay and require the complete Kleros Skills package for operational mechanics.
-            </p>
-            <Link
-              href="/skills"
-              className="mt-5 flex items-center justify-between rounded-xl border border-cyan-300/18 bg-cyan-300/[0.045] p-4 transition hover:border-cyan-300/32 hover:bg-cyan-300/[0.065]"
-            >
-              <span className="flex items-center gap-3">
-                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-300/[0.1] text-cyan-200">
-                  <Bot className="h-4 w-4" aria-hidden="true" />
-                </span>
-                <span>
-                  <span className="block text-sm font-semibold text-white">Open Guide &amp; Skills</span>
-                  <span className="mt-0.5 block text-xs text-white/42">Copy the agent prompt or inspect the local files.</span>
-                </span>
-              </span>
-              <ArrowRight className="h-4 w-4 text-cyan-200" aria-hidden="true" />
-            </Link>
+          <GuideSection id="agents" title="AI agent files">
+            <ActionSteps>
+              <ActionStep number="1">Press <strong>Skills</strong> in the header to open the machine-readable instructions.</ActionStep>
+              <ActionStep number="2">Choose Mainnet or Sepolia, then copy the displayed prompt into the agent that will use KSCORE.</ActionStep>
+              <ActionStep number="3">Use <strong>SKILL.md</strong> for the short entry point or <strong>llms-full.txt</strong> for the complete local reference.</ActionStep>
+            </ActionSteps>
+            <PrimaryLink href="/skills" label="Open Skills" />
           </GuideSection>
         </article>
 
@@ -275,61 +238,33 @@ function GuideSection({ id, title, children }: { id: string; title: string; chil
   );
 }
 
-function Step({ number, title, children }: { number: string; title: string; children: React.ReactNode }) {
+function TaskLink({ href, label }: { href: string; label: string }) {
   return (
-    <li className="grid grid-cols-[1.75rem_minmax(0,1fr)] gap-3">
-      <span className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-full border border-white/12 bg-white/[0.03] font-mono text-xs text-cyan-200">{number}</span>
-      <div>
-        <div className="font-semibold text-white/88">{title}</div>
-        <p className="mt-1 text-sm leading-6 text-white/50">{children}</p>
-      </div>
+    <a href={href} className="flex items-center justify-between rounded-lg border border-white/[0.09] bg-white/[0.02] px-4 py-3 text-sm font-medium text-white/72 transition hover:border-cyan-300/25 hover:text-cyan-100">
+      {label}
+      <ArrowRight className="h-4 w-4 text-cyan-200/70" aria-hidden="true" />
+    </a>
+  );
+}
+
+function ActionSteps({ children }: { children: React.ReactNode }) {
+  return <ol className="mt-5 space-y-3">{children}</ol>;
+}
+
+function ActionStep({ number, children }: { number: string; children: React.ReactNode }) {
+  return (
+    <li className="grid grid-cols-[2rem_minmax(0,1fr)] gap-3 rounded-lg border border-white/[0.08] bg-white/[0.018] px-4 py-3.5 text-sm leading-6 text-white/62">
+      <span className="flex h-6 w-6 items-center justify-center rounded-full border border-cyan-300/20 bg-cyan-300/[0.06] font-mono text-[11px] text-cyan-200">{number}</span>
+      <span className="[&_strong]:font-semibold [&_strong]:text-white/90">{children}</span>
     </li>
   );
 }
 
-function CompactStep({ number, title, children }: { number: string; title: string; children: React.ReactNode }) {
+function PrimaryLink({ href, label }: { href: string; label: string }) {
   return (
-    <div>
-      <div className="flex items-center gap-2 text-sm font-semibold text-white">
-        <span className="font-mono text-xs text-cyan-300">{number}.</span>
-        {title}
-      </div>
-      <p className="mt-2 text-xs leading-5 text-white/44">{children}</p>
-    </div>
-  );
-}
-
-function CheckItem({ children }: { children: React.ReactNode }) {
-  return (
-    <li className="flex items-start gap-2.5 text-sm leading-6 text-white/55">
-      <Check className="mt-1 h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />
-      <span>{children}</span>
-    </li>
-  );
-}
-
-function Callout({
-  icon: Icon,
-  title,
-  tone = "cyan",
-  children,
-}: {
-  icon: typeof ShieldCheck;
-  title: string;
-  tone?: "cyan" | "amber";
-  children: React.ReactNode;
-}) {
-  const colors =
-    tone === "amber"
-      ? "border-amber-300/15 bg-amber-300/[0.04] text-amber-100"
-      : "border-cyan-300/15 bg-cyan-300/[0.04] text-cyan-100";
-  return (
-    <div className={`mt-6 rounded-xl border p-4 ${colors}`}>
-      <div className="flex items-center gap-2 text-sm font-semibold">
-        <Icon className="h-4 w-4" aria-hidden="true" />
-        {title}
-      </div>
-      <p className="mt-2 text-sm leading-6 text-white/52">{children}</p>
-    </div>
+    <Link href={href} className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-cyan-200 transition hover:text-cyan-100">
+      {label}
+      <ArrowRight className="h-4 w-4" aria-hidden="true" />
+    </Link>
   );
 }
