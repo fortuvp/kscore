@@ -22,6 +22,8 @@ describe("AppFooter", () => {
       "/my-agents?verificationEnvironment=mainnet"
     );
     expect(screen.queryByText("Compare")).not.toBeInTheDocument();
+    expect(screen.queryByText("Explore")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Build your certificate" })).toHaveAttribute("href", "/launch");
     expect(screen.getByRole("link", { name: "Skills" })).toHaveAttribute("href", "/skills");
     expect(screen.queryByRole("link", { name: /Source code/i })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "llms.txt" })).toHaveAttribute("href", "/llms.txt");

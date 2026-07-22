@@ -320,8 +320,8 @@ export default function HomePage() {
             </div>
 
             <Button asChild className="mt-4 w-full border border-cyan-300/40 bg-cyan-300/18 text-white hover:bg-cyan-300/28">
-              <Link href={withEnvironment("/explore")}>
-                Explore
+              <Link href={withEnvironment("/verified")}>
+                Verified Agents
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
             </Button>

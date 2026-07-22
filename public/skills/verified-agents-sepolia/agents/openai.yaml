@@ -1,4 +1,4 @@
 interface:
   display_name: "Verified Agents · Sepolia"
-  short_description: "Operate Sepolia Verified Agents safely"
-  default_prompt: "Use $verified-agents-sepolia with the complete Kleros Skills package to safely prepare a Sepolia Verified Agents operation."
+  short_description: "Route Sepolia Verified Agents operations"
+  default_prompt: "Use $verified-agents-sepolia for the fixed Sepolia registry and ERC-8004 routing constants, then perform current due diligence before preparing an operation."

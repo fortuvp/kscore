@@ -61,7 +61,7 @@ const STATUS_ROWS = [
     status: "Withdrawn",
     tone: "bg-slate-400",
     meaning: "The owner voluntarily left the list without an adverse ruling.",
-    action: "Treat it as no longer verified—not as proof of misconduct.",
+    action: "Treat it as no longer verified, not as proof of misconduct.",
   },
 ] as const;
 
@@ -131,7 +131,7 @@ export default function DocsPage() {
             <p>
               Verified Agents is a permissionless, collateralized registry governed by a public policy. Anyone may submit an agent. Anyone may challenge a listing that fails the criteria. Kleros resolves disputes when the parties disagree.
             </p>
-            <Callout icon={ShieldCheck} title="A scoped signal—not a universal endorsement">
+            <Callout icon={ShieldCheck} title="A scoped signal, not a universal endorsement">
               Active means the agent currently complies with this registry’s published policy. It does not guarantee every behavior, capability, or future action.
             </Callout>
           </GuideSection>

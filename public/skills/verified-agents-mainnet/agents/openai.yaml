@@ -1,4 +1,4 @@
 interface:
   display_name: "Verified Agents · Mainnet"
-  short_description: "Operate mainnet Verified Agents safely"
-  default_prompt: "Use $verified-agents-mainnet with the complete Kleros Skills package to safely prepare an Ethereum mainnet Verified Agents operation."
+  short_description: "Route mainnet Verified Agents operations"
+  default_prompt: "Use $verified-agents-mainnet for the fixed mainnet registry and ERC-8004 routing constants, then perform current due diligence before preparing an operation."

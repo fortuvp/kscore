@@ -2,19 +2,28 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
+  Activity,
+  ArrowUpRight,
   ChevronLeft,
   ChevronRight,
+  CircleHelp,
   Grid2X2,
   List,
   Plus,
   Search,
-  ShieldCheck,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { getAgentSubgraphLabel, isAgentSubgraphNetwork, type AgentSubgraphNetwork } from "@/lib/agent-networks";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  AGENT_SUBGRAPH_NETWORKS,
+  getAgentSubgraphLabel,
+  isAgentSubgraphNetwork,
+  type AgentSubgraphNetwork,
+} from "@/lib/agent-networks";
 import { getDisplayName } from "@/lib/format";
 import { getAgentNetworkFromChainId, parseChainId } from "@/lib/block-explorer";
 import { loadCurateRegistrationFile } from "@/lib/curate-agent-fallback";
@@ -77,6 +86,45 @@ type AgentPreview = {
 
 type DisplayAgent = Parameters<typeof getDisplayName>[0];
 
+type VerifiedActivityKind =
+  | "registry_submitted"
+  | "registry_challenged"
+  | "registry_resolved"
+  | "registry_withdrawal"
+  | "oracle_positive"
+  | "oracle_revoked";
+
+type VerifiedActivity = {
+  id: string;
+  kind: VerifiedActivityKind;
+  agentId: string;
+  network: AgentSubgraphNetwork;
+  timestamp: number;
+  transactionHash: string | null;
+  externalUrl: string | null;
+};
+
+type ActivityApiResponse =
+  | { success: true; activities: VerifiedActivity[] }
+  | { success: false; error: string };
+
+type HeroBenefitKey = "review" | "discover" | "report";
+
+const HERO_BENEFITS: Record<HeroBenefitKey, { title: string; description: string }> = {
+  review: {
+    title: "Boost discoverability",
+    description: "Stake collateral and earn a certified review visible across ERC-8004-compatible apps.",
+  },
+  discover: {
+    title: "Find trusted agents",
+    description: "Browse certified agents and choose who to trust with confidence.",
+  },
+  report: {
+    title: "Get rewarded",
+    description: "Report agents that break the rules and earn the bounty when your challenge succeeds.",
+  },
+};
+
 function isAccepted(item: PgtcrItemRow, nowSec: number): boolean {
   const includedAt = Number(item.includedAt);
   if (!Number.isFinite(includedAt) || includedAt <= 0) return false;
@@ -127,6 +175,7 @@ function formatCollateral(stake: bigint): string {
 }
 
 export default function VerifiedAgentsPage() {
+  const router = useRouter();
   const { environment, deployment, withEnvironment } = useVerificationEnvironment();
   const [filter, setFilter] = React.useState<VerifiedFilter>("all");
   const [sort, setSort] = React.useState<VerifiedSort>("verifiedNewest");
@@ -140,6 +189,10 @@ export default function VerifiedAgentsPage() {
   const [loading, setLoading] = React.useState(true);
   const [previewByKey, setPreviewByKey] = React.useState<Record<string, AgentPreview>>({});
   const [pgtcrToken, setPgtcrToken] = React.useState<`0x${string}` | null>(null);
+  const [activities, setActivities] = React.useState<VerifiedActivity[]>([]);
+  const [activityLoading, setActivityLoading] = React.useState(true);
+  const [directAgentId, setDirectAgentId] = React.useState("");
+  const [directNetwork, setDirectNetwork] = React.useState<AgentSubgraphNetwork>("sepolia");
 
   React.useEffect(() => {
     try {
@@ -195,6 +248,30 @@ export default function VerifiedAgentsPage() {
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    async function loadActivity() {
+      setActivityLoading(true);
+      try {
+        const response = await fetch(
+          `/api/verified/activity?verificationEnvironment=${environment}`,
+          { cache: "no-store", signal: controller.signal }
+        );
+        const payload = (await response.json()) as ActivityApiResponse;
+        if (!controller.signal.aborted) {
+          setActivities(payload.success && Array.isArray(payload.activities) ? payload.activities : []);
+        }
+      } catch {
+        if (!controller.signal.aborted) setActivities([]);
+      } finally {
+        if (!controller.signal.aborted) setActivityLoading(false);
+      }
+    }
+
+    void loadActivity();
+    return () => controller.abort();
+  }, [environment]);
 
 
   React.useEffect(() => {
@@ -441,28 +518,106 @@ export default function VerifiedAgentsPage() {
     !normalizedQuery &&
     items.length === 0;
 
+  function openDirectAgent(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const agentId = directAgentId.trim();
+    if (!/^\d+$/.test(agentId)) return;
+    router.push(
+      withEnvironment(
+        `/agents/${encodeURIComponent(agentId)}?network=${directNetwork}&lookup=agentId`
+      )
+    );
+  }
+
   return (
     <div className="container mx-auto max-w-[1280px] overflow-x-hidden px-4 py-10 sm:px-6 sm:py-12">
-      <div className="mb-8">
-        <div className="max-w-2xl">
-          <div className="flex items-center gap-2">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-300/20 bg-emerald-300/10 shadow-[0_0_24px_rgba(16,185,129,0.12)]">
-              <ShieldCheck className="h-5 w-5 text-emerald-300" />
-            </span>
-            <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Verified Agents</h1>
+      <div className="mb-6 grid gap-6 lg:grid-cols-[minmax(0,1.85fr)_minmax(380px,1fr)] lg:items-start">
+        <section className="max-w-3xl lg:flex lg:min-h-[300px] lg:items-center">
+          <div className="w-full">
+            <h1 className="text-[3rem] font-semibold leading-[0.88] tracking-[-0.065em] text-white sm:text-[4.25rem] lg:text-[4.75rem]">
+              <span className="block">Verified</span>
+              <span className="block font-light text-white/72">
+                Agents<span className="text-cyan-200">.</span>
+              </span>
+            </h1>
+            <TooltipProvider delayDuration={90}>
+              <p className="mt-7 max-w-2xl text-base leading-8 text-white/52 sm:text-lg sm:leading-9">
+                Get a certified{" "}
+                <HeroBenefitAction benefit="review" index="01" label="review" /> for your agent.
+                <br className="hidden sm:block" />
+                {" "}
+                <HeroBenefitAction benefit="discover" index="02" label="Discover" /> trusted agents.{" "}
+                <HeroBenefitAction benefit="report" index="03" label="Report" /> misbehavior and get rewarded.
+              </p>
+            </TooltipProvider>
           </div>
-          <ul className="mt-4 grid gap-1.5 text-sm text-muted-foreground sm:text-base">
-            <li className="relative pl-4 before:absolute before:left-0 before:top-[0.65em] before:h-1 before:w-1 before:rounded-full before:bg-cyan-300/55">Stake collateral and make your agent shine.</li>
-            <li className="relative pl-4 before:absolute before:left-0 before:top-[0.65em] before:h-1 before:w-1 before:rounded-full before:bg-cyan-300/55">Browse collateralized agents and pick who to trust.</li>
-            <li className="relative pl-4 before:absolute before:left-0 before:top-[0.65em] before:h-1 before:w-1 before:rounded-full before:bg-cyan-300/55">Flag rule breakers and claim the bounty.</li>
-          </ul>
-        </div>
+        </section>
 
+        <aside
+          aria-labelledby="recent-activity-title"
+          className="overflow-hidden rounded-2xl border border-cyan-300/15 bg-cyan-300/[0.035] shadow-[0_18px_45px_rgba(0,0,0,0.2)]"
+        >
+          <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Activity className="h-4 w-4 text-cyan-200" aria-hidden="true" />
+              <h2 id="recent-activity-title" className="text-sm font-semibold text-white">
+                Recent activity
+              </h2>
+            </div>
+            <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-white/35">Onchain</span>
+          </div>
+          <div className="max-h-64 overflow-y-auto px-4">
+            {activityLoading ? (
+              <div className="py-6 text-sm text-white/45">Loading recent activity...</div>
+            ) : activities.length ? (
+              <ul className="divide-y divide-white/7">
+                {activities.map((activity) => {
+                  const preview = previewByKey[`${activity.network}:${activity.agentId}`];
+                  const agentName = preview?.name || `Agent #${activity.agentId}`;
+                  const agentHref = withEnvironment(
+                    `/agents/${encodeURIComponent(activity.agentId)}?network=${activity.network}&lookup=agentId`
+                  );
+                  return (
+                    <li key={activity.id} className="flex gap-3 py-3">
+                      <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${activityDotTone(activity.kind)}`} />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs leading-5 text-white/62">
+                          {activityPrefix(activity.kind)}{" "}
+                          <Link href={agentHref} className="font-semibold text-cyan-100 hover:text-cyan-200 hover:underline">
+                            {agentName}
+                          </Link>
+                        </p>
+                        <div className="mt-1 flex items-center gap-2 text-[10px] text-white/35">
+                          <time dateTime={new Date(activity.timestamp * 1000).toISOString()}>
+                            {formatActivityDate(activity.timestamp)}
+                          </time>
+                          {activity.externalUrl ? (
+                            <a
+                              href={activity.externalUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              aria-label={`View ${agentName} activity transaction`}
+                              className="inline-flex items-center gap-0.5 text-white/42 hover:text-cyan-200"
+                            >
+                              Transaction <ArrowUpRight className="h-2.5 w-2.5" aria-hidden="true" />
+                            </a>
+                          ) : null}
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <div className="py-6 text-sm text-white/45">No recent registry activity.</div>
+            )}
+          </div>
+        </aside>
       </div>
 
       <section
         aria-label="Agent filters"
-        className="mb-4 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.035] shadow-[0_18px_45px_rgba(0,0,0,0.18)] backdrop-blur-sm"
+        className="relative z-20 mb-4 overflow-visible rounded-2xl border border-white/10 bg-white/[0.035] shadow-[0_18px_45px_rgba(0,0,0,0.18)] backdrop-blur-sm"
       >
         <div className="flex flex-col gap-3 border-b border-white/8 p-3 sm:p-4 lg:flex-row lg:items-center">
           <label className="relative min-w-0 flex-1" htmlFor="verified-agent-search">
@@ -526,30 +681,9 @@ export default function VerifiedAgentsPage() {
               <FilterButton active={filter === "withdrawn"} onClick={() => setFilter("withdrawn")} label="Withdrawn" count={statusCounts.withdrawn} />
             </div>
           </div>
+          <StatusGuideTooltip />
         </div>
       </section>
-
-      <aside aria-labelledby="status-guide-title" className="mb-5 rounded-2xl border border-white/8 bg-black/20 px-4 py-3 sm:px-5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
-          <h2 id="status-guide-title" className="shrink-0 text-xs font-semibold uppercase tracking-[0.14em] text-white/60 lg:pt-0.5">
-            Status guide
-          </h2>
-          <dl className="grid min-w-0 flex-1 gap-x-6 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
-            <LegendItem status="active" label="Active">
-              The agent has active collateral and currently complies with the policy.
-            </LegendItem>
-            <LegendItem status="review" label="In review">
-              Registry acceptance or a challenge outcome is still pending.
-            </LegendItem>
-            <LegendItem status="removed" label="Removed">
-              A challenge and dispute found the agent non-compliant.
-            </LegendItem>
-            <LegendItem status="withdrawn" label="Withdrawn">
-              Voluntarily removed from the registry without a challenge.
-            </LegendItem>
-          </dl>
-        </div>
-      </aside>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-3">
@@ -707,6 +841,170 @@ export default function VerifiedAgentsPage() {
           ) : null}
         </div>
       )}
+
+      <form
+        onSubmit={openDirectAgent}
+        className="mt-12 overflow-hidden rounded-2xl border border-emerald-300/15 bg-[linear-gradient(110deg,rgba(16,185,129,0.065),rgba(34,211,238,0.025),rgba(0,0,0,0.08))] shadow-[0_18px_45px_rgba(0,0,0,0.16)]"
+      >
+        <div className="grid gap-5 p-5 sm:p-6 lg:grid-cols-[minmax(260px,1fr)_minmax(180px,0.65fr)_minmax(150px,0.45fr)_auto] lg:items-end">
+          <div className="lg:self-center">
+            <div className="text-[10px] font-bold uppercase tracking-[0.15em] text-emerald-200/75">Direct agent lookup</div>
+            <h2 className="mt-1.5 text-base font-semibold text-white sm:text-lg">Can&apos;t find the agent you&apos;re looking for?</h2>
+            <p className="mt-1.5 max-w-lg text-xs leading-5 text-white/48 sm:text-sm">
+              Enter its agent number and source network to open its ERC-8004 profile, even if it is not collateralized or certified.
+            </p>
+          </div>
+          <label className="grid gap-1.5 text-xs font-medium text-white/55">
+            Agent number
+            <input
+              value={directAgentId}
+              onChange={(event) => setDirectAgentId(event.target.value.replace(/\D/g, ""))}
+              inputMode="numeric"
+              pattern="[0-9]+"
+              placeholder="1436"
+              aria-label="Agent number"
+              className="h-10 rounded-xl border border-white/10 bg-black/25 px-3 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-cyan-300/50 focus:ring-2 focus:ring-cyan-300/15"
+            />
+          </label>
+          <label className="grid gap-1.5 text-xs font-medium text-white/55">
+            Agent network
+            <select
+              aria-label="Agent network"
+              value={directNetwork}
+              onChange={(event) => setDirectNetwork(event.target.value as AgentSubgraphNetwork)}
+              className="h-10 rounded-xl border border-white/10 bg-black/25 px-3 text-sm text-white outline-none [color-scheme:dark] focus:border-cyan-300/50 focus:ring-2 focus:ring-cyan-300/15"
+            >
+              {AGENT_SUBGRAPH_NETWORKS.map((network) => (
+                <option key={network} value={network}>{getAgentSubgraphLabel(network)}</option>
+              ))}
+            </select>
+          </label>
+          <Button type="submit" className="h-10 bg-emerald-300 px-5 font-semibold text-emerald-950 hover:bg-emerald-200" disabled={!/^\d+$/.test(directAgentId.trim())}>
+            View agent page
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function HeroBenefitAction({
+  benefit,
+  index,
+  label,
+}: {
+  benefit: HeroBenefitKey;
+  index: string;
+  label: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={benefit}
+          className="group/term mx-0.5 inline-flex items-start gap-1 border-b border-dotted border-cyan-300/45 px-0.5 font-medium text-white/85 outline-none transition hover:border-cyan-200 hover:text-cyan-100 focus-visible:border-cyan-200 focus-visible:text-cyan-100"
+        >
+          <span>{label}</span>
+          {" "}
+          <span aria-hidden="true" className="font-mono text-[8px] leading-4 tracking-normal text-cyan-300/55 transition group-hover/term:text-cyan-200 group-focus-visible/term:text-cyan-200">
+            {index}
+          </span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent
+        side="bottom"
+        sideOffset={12}
+        collisionPadding={16}
+        className="w-72 rounded-none border-white/10 border-t-cyan-300/55 bg-[#05090f]/98 p-0 text-white shadow-[0_24px_60px_rgba(0,0,0,0.5)]"
+      >
+        <div className="grid grid-cols-[2.5rem_1fr]">
+          <div className="border-r border-white/8 px-2 py-3 text-center font-mono text-[9px] text-cyan-200/65">
+            {index}
+          </div>
+          <div className="px-3.5 py-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-white/82">
+              {HERO_BENEFITS[benefit].title}
+            </div>
+            <p className="mt-1.5 text-xs leading-5 text-white/52">
+              {HERO_BENEFITS[benefit].description}
+            </p>
+          </div>
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function activityPrefix(kind: VerifiedActivityKind): string {
+  if (kind === "oracle_positive") return "Kleros Oracle left a positive review for";
+  if (kind === "oracle_revoked") return "Kleros Oracle revoked a review for";
+  if (kind === "registry_challenged") return "The registry received a challenge for";
+  if (kind === "registry_resolved") return "The registry resolved a challenge for";
+  if (kind === "registry_withdrawal") return "A registry withdrawal started for";
+  return "Submitted to the registry:";
+}
+
+function activityDotTone(kind: VerifiedActivityKind): string {
+  if (kind === "oracle_positive") return "bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,0.55)]";
+  if (kind === "oracle_revoked" || kind === "registry_withdrawal") return "bg-amber-300 shadow-[0_0_8px_rgba(252,211,77,0.45)]";
+  if (kind === "registry_challenged") return "bg-red-300 shadow-[0_0_8px_rgba(252,165,165,0.45)]";
+  return "bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.5)]";
+}
+
+function formatActivityDate(timestamp: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: new Date(timestamp * 1000).getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+  }).format(new Date(timestamp * 1000));
+}
+
+function StatusGuideTooltip() {
+  const [open, setOpen] = React.useState(false);
+
+  return (
+    <div
+      className="relative shrink-0"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        aria-label="Status guide"
+        aria-expanded={open}
+        aria-describedby={open ? "status-guide-tooltip" : undefined}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-black/20 text-white/45 outline-none transition hover:border-cyan-300/25 hover:text-cyan-200 focus-visible:ring-2 focus-visible:ring-cyan-300/40"
+      >
+        <CircleHelp className="h-4 w-4" aria-hidden="true" />
+      </button>
+      {open ? (
+        <div
+          id="status-guide-tooltip"
+          role="tooltip"
+          className="absolute right-0 top-full z-50 mt-2 w-[calc(100vw-2rem)] max-w-md rounded-2xl border border-white/12 bg-[#080d12]/98 p-4 shadow-[0_24px_60px_rgba(0,0,0,0.45)] before:absolute before:-top-1.5 before:right-3 before:h-3 before:w-3 before:rotate-45 before:border-l before:border-t before:border-white/12 before:bg-[#080d12] sm:w-[30rem]"
+        >
+          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-white/65">
+            Status guide
+          </div>
+          <dl className="mt-3 grid gap-x-5 gap-y-3 sm:grid-cols-2">
+            <LegendItem status="active" label="Active">
+              The agent has active collateral and currently complies with the policy.
+            </LegendItem>
+            <LegendItem status="review" label="In review">
+              Registry acceptance or a challenge outcome is still pending.
+            </LegendItem>
+            <LegendItem status="removed" label="Removed">
+              A challenge and dispute found the agent non-compliant.
+            </LegendItem>
+            <LegendItem status="withdrawn" label="Withdrawn">
+              Voluntarily removed from the registry without a challenge.
+            </LegendItem>
+          </dl>
+        </div>
+      ) : null}
     </div>
   );
 }

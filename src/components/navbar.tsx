@@ -13,13 +13,12 @@ import { ConnectButton } from "@/components/web3/connect-button";
 import type { VerificationEnvironment } from "@/lib/verification-environment";
 
 const PRIMARY_NAV_LINKS = [
-  { href: "/explore", label: "Explore" },
   { href: "/verified", label: "Verified Agents" },
-  { href: "/launch", label: "Build a Standard" },
+  { href: "/launch", label: "Build a Certificate" },
   { href: "/skills", label: "Skills" },
 ] as const;
 
-const VERIFICATION_AWARE_NAV_PATHS = new Set(["/explore", "/verified"]);
+const VERIFICATION_AWARE_NAV_PATHS = new Set(["/verified"]);
 
 export function Navbar() {
   const pathname = usePathname();

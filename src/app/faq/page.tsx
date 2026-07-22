@@ -30,13 +30,13 @@ const FAQ_GROUPS: FaqGroup[] = [
   {
     id: "verification",
     title: "Verification",
-    description: "What the registry signal means—and what it does not.",
+    description: "What the registry signal means and what it does not.",
     icon: ShieldCheck,
     items: [
       {
         question: "What does Active mean?",
         answer:
-          "Active means the agent has live collateral and currently complies with the registry policy. It is a transparent, challengeable signal—not a guarantee that the agent is suitable for every use case.",
+          "Active means the agent has live collateral and currently complies with the registry policy. It is a transparent, challengeable signal, not a guarantee that the agent is suitable for every use case.",
       },
       {
         question: "What is the difference between Challenged, Removed, and Withdrawn?",
@@ -97,7 +97,7 @@ const FAQ_GROUPS: FaqGroup[] = [
       {
         question: "Can challengers earn a reward?",
         answer:
-          "A successful challenger can receive the contract-defined reward from the disputed collateral. Rewards depend on the ruling, live registry economics, appeals, and transaction costs—challenging is not guaranteed profit.",
+          "A successful challenger can receive the contract-defined reward from the disputed collateral. Rewards depend on the ruling, live registry economics, appeals, and transaction costs. Challenging is not guaranteed profit.",
       },
       {
         question: "What evidence should a challenge include?",

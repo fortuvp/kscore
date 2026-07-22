@@ -9,7 +9,7 @@ import PermanentGTCRAbi from "@/lib/abi/PermanentGTCR.json";
 import { ERC20_ABI } from "@/lib/abi/erc20";
 import { IARBITRATOR_ABI } from "@/lib/abi/iArbitrator";
 import { executeConfirmedTransaction } from "@/lib/confirmed-transaction";
-import { uploadFileToIpfs, uploadJsonToIpfs } from "@/lib/ipfs";
+import { ipfsToGatewayUrl, uploadFileToIpfs, uploadJsonToIpfs } from "@/lib/ipfs";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -30,7 +30,11 @@ type RegistryApiResponse =
         winnerStakeMultiplier: string;
         loserStakeMultiplier: string;
         sharedStakeMultiplier: string;
-        arbitrationSettings: Array<{ metaEvidenceURI: string; arbitratorExtraData: string }>;
+        arbitrationSettings: Array<{
+          metaEvidenceURI: string;
+          arbitratorExtraData: string;
+          metadata?: { policyURI?: string | null } | null;
+        }>;
       };
     }
   | { success: false; error: string };
@@ -81,6 +85,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
   const [registry, setRegistry] = React.useState<RegistryApiResponse | null>(null);
   const [item, setItem] = React.useState<ItemApiResponse | null>(null);
   const [approvalStepDone, setApprovalStepDone] = React.useState(false);
+  const [policyConfirmed, setPolicyConfirmed] = React.useState(false);
 
   const [title, setTitle] = React.useState("");
   const [description, setDescription] = React.useState("");
@@ -91,7 +96,9 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
   const registryAddress = registry && registry.success ? (registry.registry.id as `0x${string}`) : undefined;
   const tokenAddress = registry && registry.success ? (registry.registry.token as `0x${string}`) : undefined;
   const arbitratorAddress = registry && registry.success ? (registry.registry.arbitrator.id as `0x${string}`) : undefined;
-  const arbitratorExtraData = registry && registry.success ? (registry.registry.arbitrationSettings?.[0]?.arbitratorExtraData as `0x${string}`) : undefined;
+  const arbitrationSetting = registry && registry.success ? registry.registry.arbitrationSettings?.[0] : undefined;
+  const arbitratorExtraData = arbitrationSetting?.arbitratorExtraData as `0x${string}` | undefined;
+  const policyUri = arbitrationSetting?.metadata?.policyURI || null;
 
   const multiplierDivisor = useReadContract({
     chainId: deployment.chainId,
@@ -169,6 +176,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
   React.useEffect(() => {
     if (!open) return;
     setApprovalStepDone(false);
+    setPolicyConfirmed(false);
     let cancelled = false;
     async function load() {
       try {
@@ -216,7 +224,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
         wait: (hash) => publicClient.waitForTransactionReceipt({ hash }),
       });
       await allowanceRead.refetch();
-      toast.success("Approval confirmed. You can now submit the challenge.");
+      toast.success("Approval confirmed. You can now submit the report.");
       setApprovalStepDone(true);
       return true;
     } catch (e) {
@@ -229,7 +237,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
 
   async function onChallenge() {
     if (!isConnected || !address) {
-      toast.error("Connect your wallet to challenge.");
+      toast.error("Connect your wallet to report abuse.");
       return;
     }
     if (!onRequiredChain) {
@@ -260,6 +268,10 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
       await ensureApprovalIfNeeded();
       return;
     }
+    if (!policyConfirmed) {
+      toast.error("Read the policy and confirm the report terms.");
+      return;
+    }
 
     const t = title.trim();
     const d = description.trim();
@@ -288,7 +300,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
 
       const evidenceUri = await uploadJsonToIpfs(evidenceJson, { operation: "evidence", pinToGraph: false });
 
-      toast.message("Checking challenge and waiting for confirmation…");
+      toast.message("Checking report and waiting for confirmation…");
       await executeConfirmedTransaction({
         simulate: async () =>
           (
@@ -304,13 +316,14 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
         write: (request) => writeContractAsync(request),
         wait: (hash) => publicClient.waitForTransactionReceipt({ hash }),
       });
-      toast.success("Challenge confirmed.");
+      toast.success("Report submitted.");
       setOpen(false);
       setTitle("");
       setDescription("");
       setFile(null);
+      setPolicyConfirmed(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Challenge failed");
+      toast.error(e instanceof Error ? e.message : "Report failed");
     } finally {
       setSubmitting(false);
     }
@@ -323,7 +336,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
   const balanceIssues: string[] = [];
 
   if (isConnected && onRequiredChain && !hasEnoughTokenBalance) {
-    balanceIssues.push(`Insufficient balance. Need ${formatUnits(requiredChallengeStake, resolvedTokenDecimals)} ${resolvedTokenSymbol} for the challenge stake.`);
+    balanceIssues.push(`Insufficient balance. Need ${formatUnits(requiredChallengeStake, resolvedTokenDecimals)} ${resolvedTokenSymbol} for the report deposit.`);
   }
   if (isConnected && onRequiredChain && !hasEnoughNativeBalance) {
     balanceIssues.push(`Insufficient balance. Need ${formatEther(arbitrationCost || 0n)} ETH for arbitration.`);
@@ -332,22 +345,29 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm" variant="outline">Challenge Agent</Button>
+        <Button size="sm" variant="outline">Report abuse</Button>
       </DialogTrigger>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Challenge Agent (PGTCR)</DialogTitle>
+          <DialogTitle>Report abuse</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground space-y-1">
-            <div>ItemID: <span className="font-mono">{props.itemID}</span></div>
+            <div>ItemID: <span className="break-all font-mono">{props.itemID}</span></div>
             <div>
-              Required challenge stake: <span className="font-mono">{formatUnits(requiredChallengeStake, resolvedTokenDecimals)} {resolvedTokenSymbol}</span>
+              Required report deposit: <span className="font-mono">{formatUnits(requiredChallengeStake, resolvedTokenDecimals)} {resolvedTokenSymbol}</span>
             </div>
             <div>
               Arbitration cost (msg.value): {arbitrationCost !== undefined ? <span className="font-mono">{formatEther(arbitrationCost)} ETH</span> : "-"}
             </div>
+          </div>
+
+          <div className="rounded-lg border border-emerald-300/25 bg-emerald-300/[0.07] p-4 text-sm leading-6 text-emerald-50/80">
+            <div className="font-semibold text-emerald-200">Successful report reward</div>
+            <p className="mt-1">
+              If your report succeeds, you receive {formatUnits(itemStake, resolvedTokenDecimals)} {resolvedTokenSymbol} as a bounty and your {formatUnits(requiredChallengeStake, resolvedTokenDecimals)} {resolvedTokenSymbol} report deposit is fully refunded.
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -360,7 +380,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               className="min-h-[120px] w-full rounded-md border border-border bg-background p-2 text-sm"
-              placeholder="Explain why this agent should be challenged."
+              placeholder="Explain how this agent violates the registry policy."
             />
           </div>
           <div className="space-y-2">
@@ -368,11 +388,39 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
             <Input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
           </div>
 
+          <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/20 p-3">
+            <input
+              id={`report-policy-confirmation-${props.itemID}`}
+              type="checkbox"
+              checked={policyConfirmed}
+              onChange={(event) => setPolicyConfirmed(event.target.checked)}
+              disabled={!policyUri}
+              className="mt-1 h-4 w-4 shrink-0 accent-cyan-300"
+            />
+            <div className="text-xs leading-5 text-muted-foreground">
+              <label htmlFor={`report-policy-confirmation-${props.itemID}`} className="cursor-pointer font-medium text-foreground">
+                I have read the policy. I understand my report deposit is refunded if the report succeeds and lost if it fails.
+              </label>
+              {policyUri ? (
+                <a
+                  href={ipfsToGatewayUrl(policyUri)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="ml-2 font-medium text-cyan-300 hover:text-cyan-200 hover:underline"
+                >
+                  Read policy
+                </a>
+              ) : (
+                <p className="mt-1">Loading registry policy...</p>
+              )}
+            </div>
+          </div>
+
           <div className="flex flex-col gap-2 sm:flex-row">
             <Button
               className="sm:flex-1"
               onClick={() => void onChallenge()}
-              disabled={submitting || !isConnected || !onRequiredChain || !dataReady || Boolean(activeDispute) || balanceIssues.length > 0}
+              disabled={submitting || !isConnected || !onRequiredChain || !dataReady || !policyConfirmed || Boolean(activeDispute) || balanceIssues.length > 0}
             >
               {submitting
                 ? "Working…"
@@ -382,7 +430,7 @@ export function ChallengeAgentDialog(props: { itemID: string }) {
                     ? "Insufficient balance"
                     : needsApproval && !approvalStepDone
                       ? `Approve ${resolvedTokenSymbol.toLowerCase()}`
-                      : "Challenge"}
+                      : "Report"}
             </Button>
           </div>
 

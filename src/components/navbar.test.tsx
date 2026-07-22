@@ -25,11 +25,13 @@ describe("Navbar", () => {
     expect(selectors).toHaveLength(2);
     expect(selectors.every((selector) => selector.textContent === "Testnet")).toBe(true);
     expect(selectors.every((selector) => selector.querySelector("svg"))).toBe(true);
+    expect(screen.queryByRole("link", { name: "Explore" })).not.toBeInTheDocument();
     expect(
-      screen.getAllByRole("link", { name: "Explore" }).every((link) =>
+      screen.getAllByRole("link", { name: "Verified Agents" }).every((link) =>
         link.getAttribute("href")?.includes("verificationEnvironment=testnet")
       )
     ).toBe(true);
+    expect(screen.getByRole("link", { name: "Build a Certificate" })).toHaveAttribute("href", "/launch");
   });
 
   it("keeps Skills local and removes the mistaken Source code navigation item", () => {

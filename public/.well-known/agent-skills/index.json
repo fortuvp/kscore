@@ -4,16 +4,16 @@
     {
       "name": "verified-agents-sepolia",
       "type": "archive",
-      "description": "Operate the permissionless Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum Sepolia for ERC-8004 submissions, inspection, challenges, evidence, appeals, and withdrawals. Always load the complete current Kleros Skills package for live PGTCR mechanics; use this overlay for fixed routing, source identity, policy checks, state labels, economics, and duplicate safeguards at 0x3162df9669affa8b6b6ff2147afa052249f00447.",
+      "description": "Route ERC-8004 operations to the KSCORE Verified Agents Stake Curate registry on Ethereum Sepolia. This overlay supplies only fixed registry, explorer, subgraph, and ERC-8004 contract routing for 0x3162df9669affa8b6b6ff2147afa052249f00447.",
       "url": "/skills/verified-agents-sepolia.tar.gz",
-      "digest": "sha256:83e4791f0068c4533300660a7b4ecbde6f2131932963386161e245664e0ded59"
+      "digest": "sha256:8d1cbaed98c9026f6c4438ae2b656ab4d116a98962060b5dcb1140b8991f6a8f"
     },
     {
       "name": "verified-agents-mainnet",
       "type": "archive",
-      "description": "Operate the permissionless Verified Agents Stake Curate (PermanentGTCR/PGTCR) registry on Ethereum mainnet for ERC-8004 submissions, inspection, challenges, evidence, appeals, and withdrawals. Always load the complete current Kleros Skills package for live PGTCR mechanics; use this overlay for fixed routing, source identity, policy checks, state labels, economics, and duplicate safeguards at 0x118155741eea23f56b3bd59b0c1342d5daaa6d07.",
+      "description": "Route ERC-8004 operations to the KSCORE Verified Agents Stake Curate registry on Ethereum mainnet. This overlay supplies only fixed registry, explorer, subgraph, and ERC-8004 contract routing for 0x118155741eea23f56b3bd59b0c1342d5daaa6d07.",
       "url": "/skills/verified-agents-mainnet.tar.gz",
-      "digest": "sha256:fa225a993bd199a72946b9f66254758c312953155dc83f670753e0b163f73d6b"
+      "digest": "sha256:63b3882a041ac728033e9ea721290444d7950f9353e3196203dcfb021072b220"
     }
   ]
 }

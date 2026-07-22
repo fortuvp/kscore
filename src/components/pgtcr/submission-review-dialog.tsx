@@ -57,7 +57,7 @@ export function SubmissionReviewDialog({
 
   const agentId = columns[0]
     ? preview.values[normalizePgtcrColumnKey(columns[0].label)]
-    : "—";
+    : "-";
   const stakeLabel = `${formatUnits(preview.deposit, tokenDecimals)} ${tokenSymbol}`;
   const arbitrationLabel = `${formatEther(preview.arbitrationCost)} ETH`;
   const approvalDone = approvalConfirmed || !approvalRequired || phase === "submitting" || phase === "complete";
@@ -110,7 +110,7 @@ export function SubmissionReviewDialog({
               <ReviewValue label="Arbitration deposit" value={arbitrationLabel} />
               <ReviewValue
                 label="Signing wallet"
-                value={submitter ? `${submitter.slice(0, 7)}…${submitter.slice(-5)}` : "—"}
+                value={submitter ? `${submitter.slice(0, 7)}…${submitter.slice(-5)}` : "-"}
                 mono
               />
               <ReviewValue label="Wallet prompts" value={approvalRequired ? "2 transactions" : "1 transaction"} />
@@ -127,7 +127,7 @@ export function SubmissionReviewDialog({
             </summary>
             <dl className="divide-y divide-white/[0.08] border-t border-white/[0.08] px-4">
               {columns.map((column) => {
-                const value = preview.values[normalizePgtcrColumnKey(column.label)] || "—";
+                const value = preview.values[normalizePgtcrColumnKey(column.label)] || "-";
                 return (
                   <div key={column.label} className="grid gap-1 py-3 text-xs sm:grid-cols-[130px_minmax(0,1fr)] sm:gap-3">
                     <dt className="text-muted-foreground">{column.label}</dt>

@@ -6,7 +6,6 @@ import {
   Building2,
   Gauge,
   Landmark,
-  ListChecks,
   LockKeyhole,
   Megaphone,
   Network,
@@ -18,7 +17,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
-const BADGE_EXAMPLES = [
+const CERTIFICATE_EXAMPLES = [
   "payment-ready agents",
   "trading specialists",
   "financial services agents",
@@ -30,7 +29,7 @@ const BADGE_EXAMPLES = [
 const LIST_PREVIEW = [
   { name: "Payment Operator", criteria: "KYB + policy", tone: "text-cyan-200" },
   { name: "Trading Strategist", criteria: "Min 0.7 WETH collateral", tone: "text-emerald-200" },
-  { name: "High quality auditors", criteria: "Audit standard", tone: "text-amber-200" },
+  { name: "High quality auditors", criteria: "Audit criteria", tone: "text-amber-200" },
 ] as const;
 
 export default function LaunchPage() {
@@ -39,7 +38,7 @@ export default function LaunchPage() {
   React.useEffect(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const timer = window.setInterval(
-      () => setExampleIndex((current) => (current + 1) % BADGE_EXAMPLES.length),
+      () => setExampleIndex((current) => (current + 1) % CERTIFICATE_EXAMPLES.length),
       2800
     );
     return () => window.clearInterval(timer);
@@ -48,30 +47,26 @@ export default function LaunchPage() {
   return (
     <div className="bg-[#05080d] text-white">
       <main className="container mx-auto max-w-6xl px-5 py-12 sm:px-8 sm:py-16">
-        <section className="border-y border-white/10 py-14 text-center sm:py-20">
-          <div className="flex items-center justify-center gap-2 text-xs font-semibold uppercase text-cyan-200">
-            <ListChecks className="h-4 w-4" />
-            Custom verification standards
-          </div>
-          <h1 className="mx-auto mt-5 max-w-4xl text-4xl font-bold leading-tight sm:text-5xl lg:text-6xl">
-            Build a standard the market can trust
+        <section className="pb-14 text-center sm:pb-20">
+          <h1 className="mx-auto max-w-4xl text-4xl font-bold leading-tight sm:text-5xl lg:text-6xl">
+            Build a certificate the market can trust
           </h1>
           <p className="mx-auto mt-6 max-w-3xl text-lg leading-relaxed text-white/70">
-            Define what agents must prove and launch the verification before granting a badge, access credentials or preferred terms.
+            Define what agents must prove and launch the verification before granting a certificate, access, or preferred terms.
           </p>
           <p className="mx-auto mt-3 max-w-3xl text-sm font-medium text-white/90">
-            Your requirements. Your reviewers. Your badge.
+            Your requirements. Your reviewers. Your certificate.
           </p>
           <div className="mt-8">
             <Button type="button" size="lg" className="bg-cyan-300 text-[#041014] hover:bg-cyan-200">
-              Build Your Standard
+              Build Your Certificate
             </Button>
           </div>
 
           <div className="mx-auto mt-12 max-w-3xl border border-white/12 bg-black/25 text-left">
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-              <span className="text-xs font-semibold uppercase text-white/55">Verified agent lists</span>
-              <Badge className="border-emerald-400/25 bg-emerald-400/10 text-emerald-200">REQUIREMENTS</Badge>
+              <span className="text-xs font-semibold uppercase text-white/55">Certificate holders</span>
+              <Badge className="border-emerald-400/25 bg-emerald-400/10 text-emerald-200">CERTIFICATE</Badge>
             </div>
             {LIST_PREVIEW.map((agent, index) => (
               <div key={agent.name} className="flex items-center gap-3 border-b border-white/8 px-4 py-3 last:border-b-0">
@@ -84,26 +79,35 @@ export default function LaunchPage() {
           </div>
         </section>
 
-        <section className="grid items-center gap-8 border-b border-white/10 py-12 md:grid-cols-[0.38fr_1fr]">
-          <div className="text-sm font-semibold text-white/55">Built for a specific market</div>
-          <div>
-            <div className="text-2xl font-semibold sm:text-3xl">
-              Create a verified badge for{" "}
-              <span key={BADGE_EXAMPLES[exampleIndex]} className="text-cyan-200">{BADGE_EXAMPLES[exampleIndex]}</span>
+        <div className="border-b border-white/10 pb-10">
+          <div className="mx-auto max-w-4xl overflow-hidden border border-cyan-300/20 bg-cyan-300/[0.045]">
+            <div className="grid items-center gap-5 px-6 py-5 sm:grid-cols-[auto_1fr] sm:px-7">
+              <div className="flex items-center gap-2.5 text-sm font-bold uppercase tracking-[0.14em] text-cyan-100">
+                <span className="relative flex h-11 w-11 items-center justify-center rounded-full border border-cyan-200/30 bg-cyan-200/10">
+                  <Network className="h-5 w-5" aria-hidden="true" />
+                  <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full border-2 border-[#071016] bg-emerald-300" />
+                </span>
+                Fully ERC-8004 compatible
+              </div>
+              <p className="text-base leading-7 text-white/72 sm:border-l sm:border-white/10 sm:pl-6">
+                Your certificate will be discoverable on any block explorer, app, or agent that supports ERC-8004.
+              </p>
             </div>
-            <p className="mt-3 text-sm text-white/60">Badge membership becomes a portable policy signal that any product can check.</p>
+          </div>
+        </div>
+
+        <section className="border-b border-white/10 py-12 text-center">
+          <div className="whitespace-nowrap text-[clamp(0.7rem,3.2vw,1.875rem)] font-semibold tracking-tight">
+            Create a verified certificate for{" "}
+            <span key={CERTIFICATE_EXAMPLES[exampleIndex]} className="text-cyan-200">{CERTIFICATE_EXAMPLES[exampleIndex]}</span>
           </div>
         </section>
 
         <section className="border-b border-white/10 py-14">
           <div className="max-w-3xl">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase text-amber-200">
-              <Network className="h-4 w-4" />
-              Credential network example
-            </div>
-            <h2 className="mt-4 text-3xl font-semibold">Grant privileges only when the agent complies with your criteria.</h2>
+            <h2 className="text-3xl font-semibold">Grant privileges only when the agent complies with your criteria.</h2>
             <p className="mt-4 text-base leading-relaxed text-white/70">
-              A network can issue credentials only to agents that pass verification. Protection does not stop at approval: if an agent later violates the policy, goes rogue, or is compromised, anyone can flag it and trigger a transparent dispute that can revoke its badge.
+              A network can issue certificates only to agents that pass verification. Protection does not stop at approval: if an agent later violates the policy, goes rogue, or is compromised, anyone can flag it and trigger a transparent dispute that can revoke its certificate.
             </p>
           </div>
 
@@ -112,17 +116,14 @@ export default function LaunchPage() {
             <UseCase icon={Landmark} title="Financial services" copy="Use trust scores to identify agents approved for payments, loan underwriting, and other high-assurance workflows." />
             <UseCase icon={LockKeyhole} title="Privacy" copy="Verify agents that handle user or A2A data responsibly by proving they do not retain or share it with third parties, or by providing TEE-backed attestations." />
           </div>
-          <p className="mx-auto mt-7 max-w-3xl text-center text-base leading-relaxed text-white/70">
-            Anything can be verified—you only need clear, evidence-based criteria that anyone can evaluate.
-          </p>
         </section>
 
         <section className="py-14">
-          <h2 className="text-3xl font-semibold">A standard you control</h2>
+          <h2 className="text-3xl font-semibold">A certificate you control</h2>
           <div className="mt-8 grid gap-px bg-white/10 md:grid-cols-3">
             <Benefit icon={SlidersHorizontal} number="01" title="Define the criteria" copy="Choose the evidence, deposits, reviewers, and challenge rules." />
-            <Benefit icon={Building2} number="02" title="Issue your badge" copy="Publish it under your brand and make it part of your product policy." />
-            <Benefit icon={BadgeCheck} number="03" title="Gate real benefits" copy="Use badge membership for credentials, access, placement, or preferred terms." />
+            <Benefit icon={Building2} number="02" title="Issue your certificate" copy="Publish it under your brand and make it part of your product policy." />
+            <Benefit icon={BadgeCheck} number="03" title="Gate real benefits" copy="Use certificate membership for access, placement, or preferred terms." />
           </div>
         </section>
 
@@ -130,45 +131,35 @@ export default function LaunchPage() {
           <div className="pointer-events-none absolute -right-32 top-1/2 h-80 w-80 -translate-y-1/2 rounded-full bg-cyan-300/[0.06] blur-3xl" />
           <div className="relative grid gap-10 lg:grid-cols-[0.72fr_1.28fr] lg:gap-16">
             <div className="max-w-md">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-200">
-                <TrendingUp className="h-4 w-4" />
-                Compounding value
-              </div>
-              <h2 className="mt-4 text-3xl font-semibold leading-tight sm:text-4xl">Turn Trust Into Growth</h2>
+              <h2 className="text-3xl font-semibold leading-tight sm:text-4xl">Turn Trust Into Growth</h2>
               <p className="mt-5 text-base leading-relaxed text-white/65">
                 Cut due diligence costs while verifying more agents than anyone else.
               </p>
+              <Button type="button" size="lg" className="mt-7 bg-cyan-300 text-[#041014] hover:bg-cyan-200">
+                Build Your Certificate
+              </Button>
             </div>
 
             <div className="divide-y divide-white/10">
               <GrowthPoint
                 icon={Megaphone}
-                title="Boost participation"
-                copy="Verified agents become ambassadors for your standard across the ecosystem."
+                title="More agents, more promotion for your brand"
+                copy="Verified agents become ambassadors for your certificate across the ecosystem."
               />
               <GrowthPoint
                 icon={Gauge}
-                title="Become the standard agents choose"
-                copy="Agents choose you because verification is transparent, predictable, and fast."
+                title="A certificate agents want"
+                copy="Agents pursue your certificate because it is fair, fast, and boosts their discoverability."
               />
               <GrowthPoint
                 icon={RefreshCw}
                 title="Keep compliance current"
-                copy="Update your terms and agents can adapt themselves—without adding operational risk for you."
+                copy="Update your terms and agents can adapt themselves without adding operational risk for you."
               />
             </div>
           </div>
         </section>
 
-        <section className="flex flex-col gap-6 border-t border-white/10 py-12 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-2xl font-semibold">Turn your policy into a badge products can trust</h2>
-            <p className="mt-2 text-sm text-white/60">Your organization defines what verified means; Kleros can support transparent challenges.</p>
-          </div>
-          <Button type="button" size="lg" className="shrink-0 bg-cyan-300 text-[#041014] hover:bg-cyan-200">
-            Build Your Standard
-          </Button>
-        </section>
       </main>
     </div>
   );

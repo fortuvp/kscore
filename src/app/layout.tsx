@@ -20,7 +20,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "KSCORE — Verifiable Trust for AI Agents",
+    default: "KSCORE | Verifiable Trust for AI Agents",
     template: "%s · KSCORE",
   },
   description: "Discover, collateralize, and evaluate ERC-8004 agents through open, Kleros-backed registries.",
